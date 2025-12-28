@@ -10,7 +10,7 @@
     <version>3.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Xia SQL Plugin (Montoya API)</name>
+    <name>DouSQL Plugin (Montoya API)</name>
     <description>Burp Suite插件 - SQL注入检测工具，使用Montoya API</description>
 
     <properties>

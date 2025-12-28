@@ -1,4 +1,4 @@
-package xiasql;
+package dousql;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
@@ -30,7 +30,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.params.HttpParameterType;
 import burp.api.montoya.http.message.params.ParsedHttpParameter;
 
-public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, ContextMenuItemsProvider {
+public class DouSqlPluginComplete implements BurpExtension, HttpHandler, ContextMenuItemsProvider {
 
     private MontoyaApi api;
     private JSplitPane splitPane;
@@ -126,7 +126,7 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
         this.api = api;
 
         // 设置扩展名称
-        api.extension().setName("xia SQL V3.0.2");
+        api.extension().setName("DouSQL V3.0.2");
 
         // 初始化配置目录路径
         initializeConfigDirectory();
@@ -135,8 +135,8 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
         createConfigDirectory();
 
         // 输出启动信息
-        api.logging().logToOutput("hello xia sql!");
-        api.logging().logToOutput("你好 欢迎使用 瞎注!");
+        api.logging().logToOutput("hello DouSQL!");
+        api.logging().logToOutput("你好 欢迎使用 DouSQL!");
         api.logging().logToOutput("version:3.0.2 (Montoya API)");
         api.logging().logToOutput("jar包目录: " + JAR_DIR);
         api.logging().logToOutput("配置文件目录: " + CONFIG_DIR);
@@ -269,7 +269,7 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
         gbc.weightx = 1.0;
         gbc.insets = new Insets(1, 0, 1, 0); // 上下间距1像素
 
-        JLabel jls = new JLabel("Xia SQL-安全鸭专属【超级魔改版本】｜Author By：DarkFi5");
+        JLabel jls = new JLabel("DouSQL-安全鸭专属【超级魔改版本】｜Author By：DarkFi5");
 
         chkbox1 = new JCheckBox("启动插件", true);
         chkbox2 = new JCheckBox("监控Repeater");
@@ -631,17 +631,17 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
         splitPanes.setMinimumSize(new Dimension(600, 400));  // 左侧最小宽度600像素
 
         // 注册标签页
-        api.userInterface().registerSuiteTab("xia SQL", splitPane);
+        api.userInterface().registerSuiteTab("DouSQL", splitPane);
     }
 
     private void setupEventListeners() {
         // 监听器逻辑
         chkbox1.addItemListener(e -> {
             if (chkbox1.isSelected()) {
-                api.logging().logToOutput("插件xia SQL启动");
+                api.logging().logToOutput("插件DouSQL启动");
                 switchs = 1;
             } else {
-                api.logging().logToOutput("插件xia SQL关闭");
+                api.logging().logToOutput("插件DouSQL关闭");
                 switchs = 0;
             }
         });
@@ -1381,7 +1381,7 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
         // 支持从 Scanner、Proxy、Repeater 和 Intruder 发送到插件
         if (event.isFromTool(ToolType.SCANNER) || event.isFromTool(ToolType.PROXY) || 
             event.isFromTool(ToolType.REPEATER) || event.isFromTool(ToolType.INTRUDER)) {
-            JMenuItem sendItem = new JMenuItem("Send to xia SQL");
+            JMenuItem sendItem = new JMenuItem("Send to DouSQL");
             sendItem.addActionListener(e -> {
                 if (switchs == 1) {
                     java.util.Optional<MessageEditorHttpRequestResponse> messageOpt = event.messageEditorRequestResponse();
@@ -1396,7 +1396,7 @@ public class XiaSqlPluginComplete implements BurpExtension, HttpHandler, Context
                         }).start();
                     }
                 } else {
-                    api.logging().logToOutput("插件xia SQL关闭状态！");
+                    api.logging().logToOutput("插件DouSQL关闭状态！");
                 }
             });
             menuItems.add(sendItem);
