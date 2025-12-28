@@ -34,7 +34,13 @@
 
 ## 配置文件说明
 
-插件配置文件统一存储在用户主目录的 `DouSQL/xia-sql/` 目录下：
+插件会按以下优先级确定配置文件目录：
+
+1. **用户指定目录**：通过系统属性 `-Ddousql.config.dir=/path/to/config` 指定
+2. **jar包同级目录**：如果能获取到jar包真实路径，使用jar包同级的 `xia-sql/` 目录
+3. **用户主目录**：`~/DouSQL/xia-sql/` 作为备选方案
+
+### 配置文件列表
 
 - `xia_SQL_diy_payload.ini` - 默认payload配置
 - `xia_SQL_payload_[组名].ini` - 自定义payload组配置
@@ -46,7 +52,19 @@
 - `xia_SQL_blacklist.ini` - 黑名单参数配置
 - `xia_SQL_param_filter_mode.ini` - 参数过滤模式配置
 
-**配置文件位置示例：**
+### 配置目录示例
+
+**理想情况（jar包同级）：**
+```
+/path/to/extensions/
+├── DouSql-3.0.2.jar          # 插件jar包
+└── xia-sql/                  # 配置文件目录
+    ├── xia_SQL_diy_payload.ini
+    ├── xia_SQL_payload_timebased.ini
+    └── ...
+```
+
+**备选方案（用户主目录）：**
 ```
 # Windows
 C:\Users\[用户名]\DouSQL\xia-sql\
@@ -56,14 +74,16 @@ C:\Users\[用户名]\DouSQL\xia-sql\
 /home/[用户名]/DouSQL/xia-sql/
 ```
 
-**目录结构：**
-```
-~/DouSQL/
-└── xia-sql/
-    ├── xia_SQL_diy_payload.ini
-    ├── xia_SQL_payload_timebased.ini
-    ├── xia_SQL_diy_error.ini
-    └── ...
+### 自定义配置目录
+
+如果需要指定特定的配置目录，可以在启动Burp Suite时添加系统属性：
+
+```bash
+# 指定配置目录
+java -Ddousql.config.dir=/path/to/your/config -jar burpsuite_pro.jar
+
+# 或者在Burp Suite的JVM参数中添加
+-Ddousql.config.dir=/path/to/your/config
 ```
 
 ## 快速开始

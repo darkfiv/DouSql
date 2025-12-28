@@ -154,44 +154,91 @@ public class DouSqlPluginComplete implements BurpExtension, HttpHandler, Context
     // 初始化配置目录路径
     private void initializeConfigDirectory() {
         try {
-            // 获取当前类的位置
-            String className = this.getClass().getName().replace('.', '/') + ".class";
-            java.net.URL classUrl = this.getClass().getClassLoader().getResource(className);
+            // 优先检查用户是否通过系统属性指定了配置目录
+            String userSpecifiedDir = System.getProperty("dousql.config.dir");
+            if (userSpecifiedDir != null && !userSpecifiedDir.trim().isEmpty()) {
+                JAR_DIR = userSpecifiedDir;
+                CONFIG_DIR = JAR_DIR + File.separator + "xia-sql";
+                api.logging().logToOutput("使用用户指定的配置目录: " + JAR_DIR);
+                return;
+            }
             
-            if (classUrl != null) {
-                String classPath = classUrl.toString();
-                api.logging().logToOutput("类路径: " + classPath);
+            // 方法1：通过ProtectionDomain获取jar包真实路径
+            String jarPath = null;
+            try {
+                jarPath = this.getClass().getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
+                api.logging().logToOutput("ProtectionDomain路径: " + jarPath);
                 
-                if (classPath.startsWith("jar:file:")) {
-                    // 从jar包中运行
-                    String jarPath = classPath.substring(9); // 移除 "jar:file:"
-                    int exclamationIndex = jarPath.indexOf('!');
-                    if (exclamationIndex != -1) {
-                        jarPath = jarPath.substring(0, exclamationIndex);
-                    }
-                    
-                    // 获取jar包所在目录
+                if (jarPath != null && jarPath.endsWith(".jar")) {
                     File jarFile = new File(jarPath);
-                    String jarDir = jarFile.getParent();
-                    
-                    // 检查是否是Burp的临时目录
-                    if (jarDir != null && jarDir.contains("burp") && jarDir.contains(".tmp")) {
-                        // 使用用户主目录下的DouSQL目录
-                        JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
-                        api.logging().logToOutput("检测到Burp临时目录，使用用户主目录: " + JAR_DIR);
-                    } else {
-                        JAR_DIR = jarDir != null ? jarDir : System.getProperty("user.dir");
-                    }
-                } else if (classPath.startsWith("file:")) {
-                    // 从文件系统运行（开发环境）
-                    JAR_DIR = System.getProperty("user.dir");
-                } else {
-                    // 其他情况，使用用户主目录
-                    JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
+                    JAR_DIR = jarFile.getParent();
+                    api.logging().logToOutput("通过ProtectionDomain获取jar目录: " + JAR_DIR);
                 }
-            } else {
-                // 无法获取类路径，使用用户主目录
-                JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
+            } catch (Exception e) {
+                api.logging().logToOutput("ProtectionDomain方法失败: " + e.getMessage());
+            }
+            
+            // 方法2：如果方法1失败，尝试通过类路径获取
+            if (JAR_DIR == null) {
+                String className = this.getClass().getName().replace('.', '/') + ".class";
+                java.net.URL classUrl = this.getClass().getClassLoader().getResource(className);
+                
+                if (classUrl != null) {
+                    String classPath = classUrl.toString();
+                    api.logging().logToOutput("类路径: " + classPath);
+                    
+                    if (classPath.startsWith("jar:file:")) {
+                        // 从jar包中运行
+                        String tempJarPath = classPath.substring(9); // 移除 "jar:file:"
+                        int exclamationIndex = tempJarPath.indexOf('!');
+                        if (exclamationIndex != -1) {
+                            tempJarPath = tempJarPath.substring(0, exclamationIndex);
+                        }
+                        
+                        // 获取jar包所在目录
+                        File jarFile = new File(tempJarPath);
+                        String jarDir = jarFile.getParent();
+                        
+                        // 检查是否是Burp的临时目录
+                        if (jarDir != null && jarDir.contains("burp") && jarDir.contains(".tmp")) {
+                            // 尝试从系统属性获取真实路径
+                            String burpExtDir = System.getProperty("burp.extensions.dir");
+                            if (burpExtDir != null) {
+                                JAR_DIR = burpExtDir;
+                                api.logging().logToOutput("使用Burp扩展目录: " + JAR_DIR);
+                            } else {
+                                // 使用用户主目录下的DouSQL目录
+                                JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
+                                api.logging().logToOutput("检测到Burp临时目录，使用用户主目录: " + JAR_DIR);
+                            }
+                        } else {
+                            JAR_DIR = jarDir != null ? jarDir : System.getProperty("user.dir");
+                        }
+                    } else if (classPath.startsWith("file:")) {
+                        // 从文件系统运行（开发环境）
+                        JAR_DIR = System.getProperty("user.dir");
+                    } else {
+                        // 其他情况，使用用户主目录
+                        JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
+                    }
+                }
+            }
+            
+            // 方法3：最后的备选方案
+            if (JAR_DIR == null) {
+                // 尝试从环境变量获取
+                String userDir = System.getProperty("user.dir");
+                String homeDir = System.getProperty("user.home");
+                
+                // 检查当前目录是否有写权限
+                File testDir = new File(userDir);
+                if (testDir.canWrite()) {
+                    JAR_DIR = userDir;
+                    api.logging().logToOutput("使用当前工作目录: " + JAR_DIR);
+                } else {
+                    JAR_DIR = homeDir + File.separator + "DouSQL";
+                    api.logging().logToOutput("使用用户主目录: " + JAR_DIR);
+                }
             }
             
             // 设置配置目录
