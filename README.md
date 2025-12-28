@@ -57,9 +57,49 @@
     └── ...
 ```
 
+## 快速开始
+
+### 方式一：直接下载
+从 [Releases](https://github.com/darkfiv/DouSql/releases) 页面下载最新版本的jar文件
+
+### 方式二：从源码编译
+```bash
+git clone https://github.com/darkfiv/DouSql.git
+cd DouSql
+mvn clean package
+```
+
+### 加载到Burp Suite
+1. 打开Burp Suite
+2. 进入 Extensions → Installed
+3. 点击 Add 按钮
+4. 选择编译生成的jar文件
+5. 插件加载成功后，会在标签页看到"DouSQL"
+
 ## 使用方法
 
-1. 将插件jar文件加载到Burp Suite
+### 编译插件
+
+**环境要求：**
+- Java 11+
+- Maven 3.x
+
+**编译步骤：**
+```bash
+# 克隆项目
+git clone https://github.com/darkfiv/DouSql.git
+cd DouSql
+
+# 编译打包
+mvn clean package
+
+# 编译完成后，jar文件位于：
+# target/DouSql-3.0.2.jar
+```
+
+### 安装使用
+
+1. 将编译生成的jar文件加载到Burp Suite
 2. 在Extensions标签页中找到"DouSQL"插件
 3. 配置相关检测参数和阈值
 4. 通过右键菜单或监控模式发送请求进行检测
@@ -111,9 +151,14 @@
 
 ## 系统要求
 
+**运行环境：**
 - Burp Suite Professional 2024.6+
 - Java 11+
 - 支持Windows、macOS、Linux操作系统
+
+**编译环境：**
+- Java 11+
+- Maven 3.x
 
 ## 开发环境
 
