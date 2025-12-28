@@ -19,7 +19,7 @@ buildNumber.properties
 .settings/
 .project
 .classpath
-.claude/
+.claude
 
 # OS
 .DS_Store
