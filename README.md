@@ -37,8 +37,10 @@
 插件会按以下优先级确定配置文件目录：
 
 1. **用户指定目录**：通过系统属性 `-Ddousql.config.dir=/path/to/config` 指定
-2. **jar包同级目录**：如果能获取到jar包真实路径，使用jar包同级的 `xia-sql/` 目录
-3. **用户主目录**：`~/DouSQL/xia-sql/` 作为备选方案
+2. **jar包同级目录**：如果检测到真实的jar文件，使用jar包同级的 `dousql/` 目录
+3. **用户主目录**：默认使用 `~/dousql/` 目录（推荐）
+
+**重要说明**：由于Burp Suite的安全机制，插件通常运行在临时目录中，因此配置文件默认会存储在用户主目录下的 `dousql/` 文件夹中。这是最稳定和可靠的配置方式。
 
 ### 配置文件列表
 
@@ -52,26 +54,43 @@
 - `xia_SQL_blacklist.ini` - 黑名单参数配置
 - `xia_SQL_param_filter_mode.ini` - 参数过滤模式配置
 
-### 配置目录示例
+### 配置目录位置
 
-**理想情况（jar包同级）：**
+**默认配置目录（推荐）：**
+```bash
+# Windows
+C:\Users\[用户名]\dousql\
+
+# macOS
+/Users/[用户名]/dousql/
+
+# Linux  
+/home/[用户名]/dousql/
+```
+
+**配置文件结构：**
+```
+~/dousql/
+├── xia_SQL_diy_payload.ini           # 默认payload配置
+├── xia_SQL_payload_timebased.ini     # 时间盲注payload组
+├── xia_SQL_payload_orderby.ini       # 报错注入payload组
+├── xia_SQL_diy_error.ini             # 自定义报错关键字
+├── xia_SQL_response_time_threshold.ini # 响应时间阈值配置
+├── xia_SQL_length_diff_threshold.ini  # 长度差异阈值配置
+├── xia_SQL_blacklist_urls.ini        # 黑名单URL配置
+├── xia_SQL_whitelist.ini             # 白名单参数配置
+├── xia_SQL_blacklist.ini             # 黑名单参数配置
+└── xia_SQL_param_filter_mode.ini     # 参数过滤模式配置
+```
+
+**特殊情况（jar包同级）：**
 ```
 /path/to/extensions/
 ├── DouSql-3.0.2.jar          # 插件jar包
-└── xia-sql/                  # 配置文件目录
+└── dousql/                   # 配置文件目录
     ├── xia_SQL_diy_payload.ini
     ├── xia_SQL_payload_timebased.ini
     └── ...
-```
-
-**备选方案（用户主目录）：**
-```
-# Windows
-C:\Users\[用户名]\DouSQL\xia-sql\
-
-# macOS/Linux  
-/Users/[用户名]/DouSQL/xia-sql/
-/home/[用户名]/DouSQL/xia-sql/
 ```
 
 ### 自定义配置目录
@@ -79,11 +98,22 @@ C:\Users\[用户名]\DouSQL\xia-sql\
 如果需要指定特定的配置目录，可以在启动Burp Suite时添加系统属性：
 
 ```bash
-# 指定配置目录
+# 方法1：通过命令行参数指定配置目录
 java -Ddousql.config.dir=/path/to/your/config -jar burpsuite_pro.jar
 
-# 或者在Burp Suite的JVM参数中添加
+# 方法2：在Burp Suite的JVM参数中添加
 -Ddousql.config.dir=/path/to/your/config
+```
+
+**配置目录检测日志示例：**
+```
+ProtectionDomain路径: /var/folders/.../tmp/burp.../20
+使用用户主目录: /Users/username
+hello DouSQL!
+你好 欢迎使用 DouSQL!
+version:3.0.2 (Montoya API)
+jar包目录: /Users/username
+配置文件目录: /Users/username/dousql
 ```
 
 ## 快速开始
