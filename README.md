@@ -34,7 +34,7 @@
 
 ## 配置文件说明
 
-插件配置文件统一存储在jar包同级的 `xia-sql/` 目录下：
+插件配置文件统一存储在用户主目录的 `DouSQL/xia-sql/` 目录下：
 
 - `xia_SQL_diy_payload.ini` - 默认payload配置
 - `xia_SQL_payload_[组名].ini` - 自定义payload组配置
@@ -48,9 +48,18 @@
 
 **配置文件位置示例：**
 ```
-/path/to/burp/extensions/
-├── DouSql-3.0.1.jar          # 插件jar包
-└── xia-sql/                  # 配置文件目录
+# Windows
+C:\Users\[用户名]\DouSQL\xia-sql\
+
+# macOS/Linux  
+/Users/[用户名]/DouSQL/xia-sql/
+/home/[用户名]/DouSQL/xia-sql/
+```
+
+**目录结构：**
+```
+~/DouSQL/
+└── xia-sql/
     ├── xia_SQL_diy_payload.ini
     ├── xia_SQL_payload_timebased.ini
     ├── xia_SQL_diy_error.ini

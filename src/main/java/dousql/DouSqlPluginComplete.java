@@ -172,29 +172,35 @@ public class DouSqlPluginComplete implements BurpExtension, HttpHandler, Context
                     
                     // 获取jar包所在目录
                     File jarFile = new File(jarPath);
-                    JAR_DIR = jarFile.getParent();
-                    if (JAR_DIR == null) {
-                        JAR_DIR = System.getProperty("user.dir");
+                    String jarDir = jarFile.getParent();
+                    
+                    // 检查是否是Burp的临时目录
+                    if (jarDir != null && jarDir.contains("burp") && jarDir.contains(".tmp")) {
+                        // 使用用户主目录下的DouSQL目录
+                        JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
+                        api.logging().logToOutput("检测到Burp临时目录，使用用户主目录: " + JAR_DIR);
+                    } else {
+                        JAR_DIR = jarDir != null ? jarDir : System.getProperty("user.dir");
                     }
                 } else if (classPath.startsWith("file:")) {
                     // 从文件系统运行（开发环境）
                     JAR_DIR = System.getProperty("user.dir");
                 } else {
-                    // 其他情况，使用当前工作目录
-                    JAR_DIR = System.getProperty("user.dir");
+                    // 其他情况，使用用户主目录
+                    JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
                 }
             } else {
-                // 无法获取类路径，使用当前工作目录
-                JAR_DIR = System.getProperty("user.dir");
+                // 无法获取类路径，使用用户主目录
+                JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
             }
             
-            // 设置配置目录为jar包同级的xia-sql目录
+            // 设置配置目录
             CONFIG_DIR = JAR_DIR + File.separator + "xia-sql";
             
         } catch (Exception e) {
-            // 出现异常时，使用当前工作目录
-            api.logging().logToOutput("初始化配置目录失败，使用默认路径: " + e.getMessage());
-            JAR_DIR = System.getProperty("user.dir");
+            // 出现异常时，使用用户主目录
+            api.logging().logToOutput("初始化配置目录失败，使用用户主目录: " + e.getMessage());
+            JAR_DIR = System.getProperty("user.home") + File.separator + "DouSQL";
             CONFIG_DIR = JAR_DIR + File.separator + "xia-sql";
         }
     }

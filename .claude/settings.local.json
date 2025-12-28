@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(mvn compile:*)",
+      "Bash(mvn clean:*)",
+      "Bash(mvn package:*)",
+      "Bash(wc:*)",
+      "Bash(ls:*)",
+      "Bash(jar tf:*)",
+      "Bash(jar:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)",
+      "Bash(javac:*)"
+    ]
+  }
+}
