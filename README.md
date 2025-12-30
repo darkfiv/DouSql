@@ -1,4 +1,9 @@
-# DouSql V3.0.3 - Burp Suite SQL注入检测插件
+# DouSql V3.0.4 - Burp Suite SQL注入检测插件
+
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/darkfiv/DouSql?style=flat-square&logo=github)](https://github.com/darkfiv/DouSql/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/darkfiv/DouSql?style=flat-square&logo=github)](https://github.com/darkfiv/DouSql/stargazers)
+[![GitHub downloads](https://img.shields.io/github/downloads/darkfiv/DouSql/total?style=flat-square&logo=github)](https://github.com/darkfiv/DouSql/releases)
+[![Burp Suite](https://img.shields.io/badge/Burp%20Suite-2024.6+-orange?style=flat-square&logo=portswigger)](https://portswigger.net/burp)
 
 ## 插件简介
 
@@ -22,6 +27,14 @@
 - **响应时间阈值**：可自定义时间盲注检测阈值
 - **长度差异阈值**：可配置响应长度差异检测敏感度
 - **HTTP方法过滤**：仅对GET/POST请求进行检测，提高效率
+- **自定义延时发包**：支持固定延时和随机延时，可配置延时区间（默认1-5秒）
+- **自定义追加参数**：支持为请求自动追加指定参数，兼容URL、POST、JSON等格式
+- **智能参数测试控制**：追加参数可选择是否参与payload测试，提供灵活的测试策略
+
+### V3.0.4 新增亮点
+- **JSON参数追加增强**：改进JSON格式检测逻辑，使用双重检测机制确保参数正确添加到请求体
+- **自定义延时发包**：支持三种延时模式，可配置固定或随机延时，避免WAF检测
+- **智能追加参数**：支持URL、POST、JSON三种格式的参数自动追加，可选择是否参与payload测试
 
 ### 用户界面特性
 - **双面板设计**：左侧显示扫描结果，右侧显示参数测试详情
@@ -31,11 +44,16 @@
 - **Windows系统优化**：针对Windows系统进行UI布局优化，确保所有按钮和组件完整显示
 
 ### 工具集成
-- **多工具支持**：支持从Scanner、Proxy、Repeater、Intruder发送请求
 - **右键菜单集成**：可通过右键菜单快速发送请求到插件
-- **监控模式**：支持实时监控Proxy和Repeater的流量
-- **自动检测**：Scanner和Intruder的请求会自动进行检测
+- **选择性监控**：默认只监控Proxy和Repeater的流量，需要手动启用对应的监控选项
+- **自动检测**：通过右键菜单发送的请求会自动进行检测
 - **多格式参数支持**：支持URL参数、POST参数、JSON参数、XML参数、Cookie参数等
+
+### 监控模式说明
+- **Proxy监控**：启用后自动检测通过Proxy的所有HTTP流量
+- **Repeater监控**：启用后自动检测Repeater发送的请求
+- **Scanner/Intruder**：默认不自动监控，可通过右键菜单手动发送到插件
+- **右键发送**：所有工具都支持通过右键菜单发送请求到插件进行检测
 
 ### 配置目录位置
 
@@ -69,23 +87,11 @@ C:\Users\[用户名]\dousql\
 **特殊情况（jar包同级）：**
 ```
 /path/to/extensions/
-├── DouSql-3.0.2.jar          # 插件jar包
+├── DouSql-3.0.4.jar          # 插件jar包
 └── dousql/                   # 配置文件目录
     ├── xia_SQL_diy_payload.ini
     ├── xia_SQL_payload_timebased.ini
     └── ...
-```
-
-### 自定义配置目录
-
-如果需要指定特定的配置目录，可以在启动Burp Suite时添加系统属性：
-
-```bash
-# 方法1：通过命令行参数指定配置目录
-java -Ddousql.config.dir=/path/to/your/config -jar burpsuite_pro.jar
-
-# 方法2：在Burp Suite的JVM参数中添加
--Ddousql.config.dir=/path/to/your/config
 ```
 
 **配置目录检测日志示例：**
@@ -94,7 +100,7 @@ ProtectionDomain路径: /var/folders/.../tmp/burp.../20
 使用用户主目录: /Users/username
 hello DouSQL!
 你好 欢迎使用 DouSQL!
-version:3.0.2 (Montoya API)
+version:3.0.4 (Montoya API)
 jar包目录: /Users/username
 配置文件目录: /Users/username/dousql
 ```
@@ -136,7 +142,7 @@ cd DouSql
 mvn clean package
 
 # 编译完成后，jar文件位于：
-# target/DouSql-3.0.2.jar
+# target/DouSql-3.0.4.jar
 ```
 
 ### 安装使用
@@ -220,6 +226,13 @@ mvn clean package
 
 ## 更新记录
 
+### V3.0.4 (2025-12-30)
+- 新增自定义延时发包功能，支持固定延时和随机延时模式
+- 新增自定义追加参数功能，支持URL、POST、JSON三种格式
+- 分离payload保存和加载功能，添加独立的保存按钮
+- 改进JSON参数追加检测逻辑，使用双重检测机制提高准确性
+
+
 ### V3.0.3 (2025-12-29)
 - 修复自定义payload组模块在Windows下新增/删除/重命名按钮展示不全的问题
 
@@ -249,7 +262,6 @@ mvn clean package
 - 优化错误检测优先级，报错信息优先于其他变化标记
 - 新增状态栏时间超时标记，完善检测结果展示
 - 修复多线程并发问题，提升插件稳定性
-
 
 
 ## 免责声明
