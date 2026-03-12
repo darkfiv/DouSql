@@ -1,0 +1,104 @@
+=== 编码修复完成（无需修复）===
+=== 开始处理HTTP请求 ===
+URL: https://collector.github.com:443/github/collect
+方法: POST
+工具标识: 1024 (Menu)
+生成MD5标识: 8B15926AE47ACD77F80A39F310D1E857
+保存原始响应体长度: 0 (MD5: 8B15926AE47ACD77F80A39F310D1E857)
+=== 工具标识调试 ===
+传入的toolFlag: 1024
+LogEntry中的toolFlag: 1024
+LogEntry的getToolName(): Menu
+=== 工具标识调试结束 ===
+=== 创建LogEntry调试 ===
+URL: https://collector.github.com:443/github/collect
+RequestResponse是否为null: false
+Request长度: 798
+Response长度: null
+=== 添加到UI ===
+=== addScanResult调用 ===
+添加扫描结果: https://collector.github.com:443/github/collect
+扫描结果列表大小: 6
+触发表格更新，新行索引: 5
+表格更新完成
+扫描结果已添加到UI，当前总数: 6
+=== 准备开始Payload测试 ===
+即将调用startPayloadTesting方法
+参数: requestResponse=true, requestInfo=true, dataMd5=8B15926AE47ACD77F80A39F310D1E857
+=== Payload内容检查 ===
+=== 追加参数配置调试结束 ===
+跳过参数: _octo (类型: 2 - Cookie参数)
+跳过参数: logged_in (类型: 2 - Cookie参数)
+跳过参数: cpu_bucket (类型: 2 - Cookie参数)
+跳过参数: preferred_color_mode (类型: 2 - Cookie参数)
+跳过参数: tz (类型: 2 - Cookie参数)
+测试参数: client_id (类型: 6 - JSON参数, 值: 1832537579.1744775748)
+  -> 参数值为数字: 1832537579.1744775748，转换为字符串格式
+    [processCustomPayload] 执行空格编码...
+    [processCustomPayload] 编码前: [,1]
+    [processCustomPayload] 编码后: [,1]
+    [processCustomPayload] 返回payload: [,1]
+  -> 调用 helpers.buildParameter("client_id", "1832537579.1744775748,1", 6)
+  -> buildParameter 返回的参数值: [1832537579.1744775748,1]
+  -> Burp的updateParameter不支持此参数类型，尝试手动构建请求...
+  -> 参数名: client_id
+  -> 参数类型: 6 - JSON参数
+  -> 参数原始值: 1832537579.1744775748
+  -> 测试值: 1832537579.1744775748,1
+  -> 开始手动构建请求...
+  -> 原始请求体: {"client_id":"1832537579.1744775748"}
+  -> 参数名: client_id
+  -> 参数原始值: 1832537579.1744775748
+  -> 新值: 1832537579.1744775748,1
+  -> 不是JSON格式，无法手动构建
+  -> 参数值为数字: 1832537579.1744775748，转换为字符串格式
+    [processCustomPayload] 执行空格编码...
+    [processCustomPayload] 编码前: [,0]
+    [processCustomPayload] 编码后: [,0]
+    [processCustomPayload] 返回payload: [,0]
+  -> 调用 helpers.buildParameter("client_id", "1832537579.1744775748,0", 6)
+  -> buildParameter 返回的参数值: [1832537579.1744775748,0]
+  -> Burp的updateParameter不支持此参数类型，尝试手动构建请求...
+  -> 参数名: client_id
+  -> 参数类型: 6 - JSON参数
+  -> 参数原始值: 1832537579.1744775748
+  -> 测试值: 1832537579.1744775748,0
+  -> 开始手动构建请求...
+  -> 原始请求体: {"client_id":"1832537579.1744775748"}
+  -> 参数名: client_id
+  -> 参数原始值: 1832537579.1744775748
+  -> 新值: 1832537579.1744775748,0
+  -> 不是JSON格式，无法手动构建
+  -> 参数值为数字: 1832537579.1744775748，转换为字符串格式
+    [processCustomPayload] 执行空格编码...
+    [processCustomPayload] 编码前: [,(select sleep(5))]
+    [processCustomPayload] 编码后: [,(select%20sleep(5))]
+    [processCustomPayload] 返回payload: [,(select%20sleep(5))]
+  -> 调用 helpers.buildParameter("client_id", "1832537579.1744775748,(select%20sleep(5))", 6)
+  -> buildParameter 返回的参数值: [1832537579.1744775748,(select%20sleep(5))]
+  -> Burp的updateParameter不支持此参数类型，尝试手动构建请求...
+  -> 参数名: client_id
+  -> 参数类型: 6 - JSON参数
+  -> 参数原始值: 1832537579.1744775748
+  -> 测试值: 1832537579.1744775748,(select%20sleep(5))
+  -> 开始手动构建请求...
+  -> 原始请求体: {"client_id":"1832537579.1744775748"}
+  -> 参数名: client_id
+  -> 参数原始值: 1832537579.1744775748
+  -> 新值: 1832537579.1744775748,(select%20sleep(5))
+  -> 不是JSON格式，无法手动构建
+完成测试，总共执行了 3 次payload测试，跳过了 5 个参数
+扫描结果状态已更新: 8B15926AE47ACD77F80A39F310D1E857 -> end!
+=== startPayloadTesting调用完成 ===
+=== 更新Payload详情 ===
+选中的扫描结果: https://collector.github.com:443/github/collect
+MD5标识: 8B15926AE47ACD77F80A39F310D1E857
+找到 0 个相关的Payload详情
+=== 调试信息 ===
+Request长度: 798
+Response长度: null
+Request前100字符: POST /github/collect HTTP/1.1
+Host: collector.github.com
+Cookie: _octo=GH1.1.1832537579.1744775748
+扫描结果表格: HTTP编辑器数据设置完成
+Payload详情表格已刷新，显示MD5=8B15926AE47ACD77F80A39F310D1E857的详情
