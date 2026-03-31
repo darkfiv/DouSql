@@ -39,7 +39,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, IContextMenuF
     
     // 扩展信息
     public static final String EXTENSION_NAME = "DouSQL-AnQuanYa";
-    public static final String VERSION = "3.0.9";
+    public static final String VERSION = "3.0.10";
     
     // 配置变量
     public volatile boolean isEnabled = true;

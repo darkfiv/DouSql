@@ -2536,6 +2536,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     }
 
     private void sendPayloadToSqlmap(LogEntry entry) {
+        callbacks.printOutput("准备发送到 SQLMap: " + (entry != null ? entry.getParameter() : "null"));
         IHttpRequestResponse originalRequestResponse = getOriginalRequestResponseForPayload(entry);
         if (entry == null || originalRequestResponse == null || originalRequestResponse.getRequest() == null) {
             JOptionPane.showMessageDialog(mainSplitPane, "当前记录没有可用的原始请求，无法发送到 SQLMap", "提示", JOptionPane.WARNING_MESSAGE);
@@ -2559,10 +2560,17 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             File requestFile = File.createTempFile("dousql_" + safeParam + "_", ".txt");
             Files.write(requestFile.toPath(), normalizeRequestForSqlmap(originalRequestResponse.getRequest()));
 
-            String finalCommand = buildSqlmapCommand(entry, requestFile, outputDir);
-            showCommandOutputWindow("SQLMap - " + entry.getParameter(), finalCommand, requestFile);
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(mainSplitPane, "生成 SQLMap 请求文件失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            List<String> commandParts = buildSqlmapCommandParts(entry, requestFile, outputDir);
+            String finalCommand = formatCommandForDisplay(commandParts);
+            callbacks.printOutput("SQLMap 命令: " + finalCommand);
+            if (isWindows()) {
+                launchSqlmapInExternalConsole(entry, commandParts, finalCommand, requestFile);
+            } else {
+                showCommandOutputWindow("SQLMap - " + entry.getParameter(), commandParts, finalCommand, requestFile);
+            }
+        } catch (Exception e) {
+            callbacks.printError("发送到 SQLMap 失败: " + e.getMessage());
+            JOptionPane.showMessageDialog(mainSplitPane, "发送到 SQLMap 失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -2582,7 +2590,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         return payloadEntry.getRequestResponse();
     }
 
-    private String buildSqlmapCommand(LogEntry entry, File requestFile, File outputDir) {
+    private List<String> buildSqlmapCommandParts(LogEntry entry, File requestFile, File outputDir) {
         String options = burpExtender.config.getSqlmapDefaultOptions();
         if (!options.contains("--level")) {
             options = options + " --level 3";
@@ -2593,30 +2601,72 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         if (!options.contains("--ignore-stdin")) {
             options = options + " --ignore-stdin";
         }
-        String expandedOptions = options
-            .replace("{requestFile}", shellQuote(requestFile.getAbsolutePath()))
-            .replace("{parameter}", shellQuote(entry.getParameter()))
-            .replace("{outputDir}", shellQuote(outputDir.getAbsolutePath()));
-
-        String sqlmapBinary;
-        String pythonPath = burpExtender.config.getSqlmapPythonPath();
-        if (pythonPath == null || pythonPath.trim().isEmpty()) {
-            sqlmapBinary = shellQuote(burpExtender.config.getSqlmapPath());
-        } else {
-            sqlmapBinary = shellQuote(pythonPath) + " " + shellQuote(burpExtender.config.getSqlmapPath());
+        if (isWindows() && !options.contains("--disable-coloring")) {
+            options = options + " --disable-coloring";
         }
 
-        return sqlmapBinary + " " + expandedOptions;
+        List<String> commandParts = new ArrayList<>();
+        String pythonPath = burpExtender.config.getSqlmapPythonPath();
+        if (pythonPath == null || pythonPath.trim().isEmpty()) {
+            commandParts.add(burpExtender.config.getSqlmapPath());
+        } else {
+            commandParts.add(pythonPath);
+            commandParts.add(burpExtender.config.getSqlmapPath());
+        }
+
+        for (String token : splitCommandLine(options)) {
+            commandParts.add(token
+                .replace("{requestFile}", requestFile.getAbsolutePath())
+                .replace("{parameter}", entry.getParameter())
+                .replace("{outputDir}", outputDir.getAbsolutePath()));
+        }
+
+        return commandParts;
     }
 
-    private void showCommandOutputWindow(String title, String command, File requestFile) {
+    private String formatCommandForDisplay(List<String> commandParts) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < commandParts.size(); i++) {
+            if (i > 0) {
+                builder.append(" ");
+            }
+            builder.append(quoteForDisplay(commandParts.get(i)));
+        }
+        return builder.toString();
+    }
+
+    private void launchSqlmapInExternalConsole(LogEntry entry, List<String> commandParts, String displayCommand, File requestFile) throws IOException {
+        String consoleTitle = "DouSQL SQLMap - " + (entry.getParameter() == null || entry.getParameter().trim().isEmpty()
+            ? "request"
+            : sanitizeFileName(entry.getParameter()));
+
+        List<String> launcher = new ArrayList<>();
+        launcher.add("cmd.exe");
+        launcher.add("/c");
+        launcher.add("start");
+        launcher.add("\"" + consoleTitle + "\"");
+        launcher.add("cmd.exe");
+        launcher.add("/k");
+        launcher.add(displayCommand);
+
+        new ProcessBuilder(launcher).start();
+
+        JOptionPane.showMessageDialog(
+            mainSplitPane,
+            "已在外部 cmd 窗口启动 SQLMap。\n\nrequest file: " + requestFile.getAbsolutePath() + "\n\n关闭该 cmd 窗口即可终止本次测试。",
+            "SQLMap 已启动",
+            JOptionPane.INFORMATION_MESSAGE
+        );
+    }
+
+    private void showCommandOutputWindow(String title, List<String> commandParts, String displayCommand, File requestFile) {
         JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(mainSplitPane), title, false);
         dialog.setLayout(new BorderLayout(8, 8));
 
         JTextArea outputArea = new JTextArea();
         outputArea.setEditable(false);
         outputArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        outputArea.setText("$ " + command + "\n\n" + "request file: " + requestFile.getAbsolutePath() + "\n\n");
+        outputArea.setText("$ " + displayCommand + "\n\n" + "request file: " + requestFile.getAbsolutePath() + "\n\n");
 
         JScrollPane scrollPane = new JScrollPane(outputArea);
 
@@ -2653,7 +2703,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         Thread worker = new Thread(() -> {
             Process process = null;
             try {
-                ProcessBuilder processBuilder = createShellProcessBuilder(command);
+                ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
                 processBuilder.redirectErrorStream(true);
                 processRef[0] = processBuilder.start();
                 process = processRef[0];
@@ -2691,19 +2741,55 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         worker.start();
     }
 
-    private ProcessBuilder createShellProcessBuilder(String command) {
-        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (osName.contains("win")) {
-            return new ProcessBuilder("cmd.exe", "/c", command);
+    private List<String> splitCommandLine(String commandLine) {
+        List<String> tokens = new ArrayList<>();
+        if (commandLine == null || commandLine.trim().isEmpty()) {
+            return tokens;
         }
-        return new ProcessBuilder("/bin/sh", "-c", "exec " + command);
+
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuotes = false;
+        boolean inDoubleQuotes = false;
+
+        for (int i = 0; i < commandLine.length(); i++) {
+            char c = commandLine.charAt(i);
+            if (c == '\'' && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes;
+                continue;
+            }
+            if (c == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes;
+                continue;
+            }
+            if (Character.isWhitespace(c) && !inSingleQuotes && !inDoubleQuotes) {
+                if (current.length() > 0) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                }
+                continue;
+            }
+            current.append(c);
+        }
+
+        if (current.length() > 0) {
+            tokens.add(current.toString());
+        }
+
+        return tokens;
     }
 
-    private String shellQuote(String value) {
+    private String quoteForDisplay(String value) {
         if (value == null) {
-            return "''";
+            return "\"\"";
         }
-        return "'" + value.replace("'", "'\"'\"'") + "'";
+        if (value.isEmpty() || value.matches(".*\\s+.*")) {
+            return "\"" + value.replace("\"", "\\\"") + "\"";
+        }
+        return value;
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private String sanitizeFileName(String name) {
