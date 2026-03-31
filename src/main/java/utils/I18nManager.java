@@ -241,7 +241,7 @@ public class I18nManager {
         
         // 复选框文本
         messages.put("checkbox.custom.payload", "自定义payload");
-        messages.put("checkbox.url.encode.spaces", "空格url编码");
+        messages.put("checkbox.url.encode.spaces", "空格替换为+");
         messages.put("checkbox.empty.param.values", "参数值置空");
         messages.put("checkbox.enable.custom.error", "启用自定义报错信息（配置文件：%s）");
         messages.put("checkbox.enable.append.params", "启用自定义追加参数（启用即生效）");
@@ -411,7 +411,7 @@ public class I18nManager {
         
         // Checkbox texts
         messages.put("checkbox.custom.payload", "Custom Payload");
-        messages.put("checkbox.url.encode.spaces", "URL Encode Spaces");
+        messages.put("checkbox.url.encode.spaces", "Spaces to +");
         messages.put("checkbox.empty.param.values", "Empty Param Values");
         messages.put("checkbox.enable.custom.error", "Enable Custom Error Messages (Config file: %s)");
         messages.put("checkbox.enable.append.params", "Enable Custom Append Parameters (Takes effect immediately)");

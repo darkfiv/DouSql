@@ -16,7 +16,7 @@ public class DouSqlConfig {
     private String configDirectory;
     
     // 各种配置
-    private int responseTimeThreshold = 2000; // 响应时间阈值(毫秒) - 用于检测时间盲注
+    private int responseTimeThreshold = 5000; // 响应时间阈值(毫秒) - 用于检测时间盲注
     private int requestTimeout = 30000; // 请求超时时间(毫秒)，默认30秒 - 超过此时间直接丢弃
     private int lengthDiffThreshold = 100;
     private List<String> errorKeywords = new ArrayList<>();
@@ -40,6 +40,12 @@ public class DouSqlConfig {
     
     // 响应过滤配置
     private ResponseFilterConfig responseFilterConfig = new ResponseFilterConfig();
+
+    // SQLMap 配置
+    private String sqlmapPath = "sqlmap.py";
+    private String sqlmapPythonPath = "python3";
+    private String sqlmapDefaultOptions = "-r {requestFile} -p {parameter} --batch --level 3 --risk 3 --ignore-stdin --output-dir={outputDir}";
+    private String sqlmapOutputDirectory = System.getProperty("java.io.tmpdir") + File.separator + "dousql-sqlmap";
     
     public DouSqlConfig(BurpExtender burpExtender) {
         this.burpExtender = burpExtender;
@@ -75,6 +81,8 @@ public class DouSqlConfig {
         loadDelayConfig();
         loadAppendParamsConfig();
         loadUrlBlacklist();
+        loadResponseFilterConfig();
+        loadSqlmapConfig();
         
         callbacks.printOutput("所有配置加载完成");
     }
@@ -266,7 +274,7 @@ public class DouSqlConfig {
             writer.newLine();
             writer.write("#   用途：检测时间盲注，当响应时间超过此阈值时标记为TIME");
             writer.newLine();
-            writer.write("#   默认：2000毫秒(2秒)");
+            writer.write("#   默认：5000毫秒(5秒)");
             writer.newLine();
             writer.write("# ");
             writer.newLine();
@@ -443,6 +451,12 @@ public class DouSqlConfig {
     
     // URL黑名单配置getter
     public List<String> getUrlBlacklist() { return new ArrayList<>(urlBlacklist); }
+
+    // SQLMap 配置getter
+    public String getSqlmapPath() { return sqlmapPath; }
+    public String getSqlmapPythonPath() { return sqlmapPythonPath; }
+    public String getSqlmapDefaultOptions() { return sqlmapDefaultOptions; }
+    public String getSqlmapOutputDirectory() { return sqlmapOutputDirectory; }
     
     // Setter方法
     public void setResponseTimeThreshold(int threshold) { this.responseTimeThreshold = threshold; }
@@ -496,45 +510,111 @@ public class DouSqlConfig {
     }
     
     /**
-     * 加载延时配置 - 不从文件加载，始终使用默认值（无延时）
+     * 加载延时配置
      */
     private void loadDelayConfig() {
-        // 延时配置不持久化，始终使用默认值
-        delayMode = 0; // 默认无延时
+        delayMode = 0;
         fixedDelay = 1000;
         randomDelayMin = 1000;
         randomDelayMax = 5000;
-        
-        callbacks.printOutput("延时配置初始化: 模式=0(无延时), 固定延时=" + fixedDelay + "ms (仅内存配置，不持久化)");
+
+        Properties properties = new Properties();
+        File configFile = new File(configDirectory, "xia_SQL_delay_config.ini");
+        if (!configFile.exists()) {
+            callbacks.printOutput("延时配置文件不存在，使用默认配置");
+            return;
+        }
+
+        try (FileInputStream inputStream = new FileInputStream(configFile)) {
+            properties.load(inputStream);
+            delayMode = Integer.parseInt(properties.getProperty("delayMode", "0"));
+            fixedDelay = Integer.parseInt(properties.getProperty("fixedDelay", "1000"));
+            randomDelayMin = Integer.parseInt(properties.getProperty("randomDelayMin", "1000"));
+            randomDelayMax = Integer.parseInt(properties.getProperty("randomDelayMax", "5000"));
+            callbacks.printOutput("延时配置已加载: 模式=" + delayMode + ", 固定延时=" + fixedDelay + "ms");
+        } catch (Exception e) {
+            callbacks.printError("加载延时配置失败，使用默认配置: " + e.getMessage());
+            delayMode = 0;
+            fixedDelay = 1000;
+            randomDelayMin = 1000;
+            randomDelayMax = 5000;
+        }
     }
     
     /**
-     * 设置延时配置 - 仅内存配置，不持久化
+     * 设置延时配置并持久化
      */
     public void setDelayConfig(int mode, int fixed, int minRandom, int maxRandom) {
         this.delayMode = mode;
         this.fixedDelay = fixed;
         this.randomDelayMin = minRandom;
         this.randomDelayMax = maxRandom;
-        
-        callbacks.printOutput("延时配置已更新（仅内存）: 模式=" + mode + ", 固定延时=" + fixed + "ms");
+
+        Properties properties = new Properties();
+        properties.setProperty("delayMode", String.valueOf(mode));
+        properties.setProperty("fixedDelay", String.valueOf(fixed));
+        properties.setProperty("randomDelayMin", String.valueOf(minRandom));
+        properties.setProperty("randomDelayMax", String.valueOf(maxRandom));
+
+        try (FileOutputStream outputStream = new FileOutputStream(new File(configDirectory, "xia_SQL_delay_config.ini"))) {
+            properties.store(outputStream, "DouSQL delay config");
+            callbacks.printOutput("延时配置已保存: 模式=" + mode + ", 固定延时=" + fixed + "ms");
+        } catch (IOException e) {
+            callbacks.printError("保存延时配置失败: " + e.getMessage());
+        }
     }
     
     /**
-     * 加载追加参数配置 - 简化版本，不从文件加载，默认禁用
+     * 加载追加参数配置
      */
     private void loadAppendParamsConfig() {
-        // 追加参数功能默认禁用，不进行持久化
         appendParamsEnabled = false;
         appendParams.clear();
         testableAppendParams.clear();
-        
-        // callbacks.printOutput("=== 追加参数配置初始化 ===");
-        // callbacks.printOutput("追加参数功能默认禁用（不持久化保存）");
-        // callbacks.printOutput("启用状态: " + appendParamsEnabled);
-        // callbacks.printOutput("参数数量: " + appendParams.size());
-        // callbacks.printOutput("可测试参数数量: " + testableAppendParams.size());
-        // callbacks.printOutput("=== 追加参数配置初始化完成 ===");
+
+        File enabledFile = new File(configDirectory, "xia_SQL_append_params_enabled.ini");
+        if (enabledFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(enabledFile))) {
+                String line = reader.readLine();
+                appendParamsEnabled = Boolean.parseBoolean(line != null ? line.trim() : "false");
+            } catch (IOException e) {
+                callbacks.printError("加载追加参数启用状态失败: " + e.getMessage());
+            }
+        }
+
+        File paramsFile = new File(configDirectory, "xia_SQL_append_params.ini");
+        if (paramsFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(paramsFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    String[] parts = line.split(":", 2);
+                    if (parts.length == 2) {
+                        appendParams.put(parts[0].trim(), parts[1].trim());
+                    }
+                }
+            } catch (IOException e) {
+                callbacks.printError("加载追加参数配置失败: " + e.getMessage());
+            }
+        }
+
+        File testableFile = new File(configDirectory, "xia_SQL_append_params_testable.ini");
+        if (testableFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(testableFile))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (!line.isEmpty() && !line.startsWith("#")) {
+                        testableAppendParams.add(line);
+                    }
+                }
+            } catch (IOException e) {
+                callbacks.printError("加载可测试追加参数失败: " + e.getMessage());
+            }
+        }
     }
     
     /**
@@ -584,7 +664,7 @@ public class DouSqlConfig {
     }
     
     /**
-     * 设置追加参数配置 - 仅内存配置，不持久化
+     * 设置追加参数配置并持久化
      */
     public void saveAppendParamsConfig(boolean enabled, Map<String, String> params, Set<String> testableParams) {
         callbacks.printOutput("=== 保存追加参数配置 ===");
@@ -610,7 +690,35 @@ public class DouSqlConfig {
             }
         }
         
-        callbacks.printOutput("追加参数配置已更新（仅内存，不持久化）: 启用=" + enabled + 
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(new File(configDirectory, "xia_SQL_append_params_enabled.ini")))) {
+            writer.write(String.valueOf(enabled));
+        } catch (IOException e) {
+            callbacks.printError("保存追加参数启用状态失败: " + e.getMessage());
+        }
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(new File(configDirectory, "xia_SQL_append_params.ini")))) {
+            writer.write("# 追加参数配置（格式：key:value，每行一个）");
+            writer.newLine();
+            for (Map.Entry<String, String> entry : this.appendParams.entrySet()) {
+                writer.write(entry.getKey() + ":" + entry.getValue());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            callbacks.printError("保存追加参数内容失败: " + e.getMessage());
+        }
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(new File(configDirectory, "xia_SQL_append_params_testable.ini")))) {
+            writer.write("# 参与payload测试的追加参数");
+            writer.newLine();
+            for (String paramName : this.testableAppendParams) {
+                writer.write(paramName);
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            callbacks.printError("保存可测试追加参数失败: " + e.getMessage());
+        }
+
+        callbacks.printOutput("追加参数配置已保存: 启用=" + enabled + 
                             ", 参数=" + params.size() + "个" +
                             ", 可测试=" + testableParams.size() + "个");
         callbacks.printOutput("=== 保存追加参数配置完成 ===");
@@ -623,6 +731,19 @@ public class DouSqlConfig {
         this.appendParamsEnabled = false;
         this.appendParams.clear();
         this.testableAppendParams.clear();
+
+        File enabledFile = new File(configDirectory, "xia_SQL_append_params_enabled.ini");
+        File paramsFile = new File(configDirectory, "xia_SQL_append_params.ini");
+        File testableFile = new File(configDirectory, "xia_SQL_append_params_testable.ini");
+        if (enabledFile.exists()) {
+            enabledFile.delete();
+        }
+        if (paramsFile.exists()) {
+            paramsFile.delete();
+        }
+        if (testableFile.exists()) {
+            testableFile.delete();
+        }
         
         callbacks.printOutput("追加参数配置已清除，恢复默认禁用状态");
     }
@@ -771,9 +892,22 @@ public class DouSqlConfig {
      * 保存响应过滤配置
      */
     public void saveResponseFilterConfig() {
-        try {
-            File configFile = new File(configDirectory, "response_filter.json");
-            // 这里可以实现 JSON 序列化保存
+        Properties properties = new Properties();
+        properties.setProperty("enabled", String.valueOf(responseFilterConfig.isEnabled()));
+        properties.setProperty("matchAll", String.valueOf(responseFilterConfig.isMatchAll()));
+        properties.setProperty("conditionCount", String.valueOf(responseFilterConfig.getConditions().size()));
+
+        for (int i = 0; i < responseFilterConfig.getConditions().size(); i++) {
+            ResponseFilterConfig.FilterCondition condition = responseFilterConfig.getConditions().get(i);
+            properties.setProperty("condition." + i + ".type", condition.getType().name());
+            properties.setProperty("condition." + i + ".operator", condition.getOperator().name());
+            properties.setProperty("condition." + i + ".value", condition.getValue() == null ? "" : condition.getValue());
+            properties.setProperty("condition." + i + ".headerName", condition.getHeaderName() == null ? "" : condition.getHeaderName());
+            properties.setProperty("condition." + i + ".enabled", String.valueOf(condition.isEnabled()));
+        }
+
+        try (FileOutputStream outputStream = new FileOutputStream(new File(configDirectory, "response_filter.properties"))) {
+            properties.store(outputStream, "DouSQL response filter config");
             callbacks.printOutput("响应过滤配置已保存");
         } catch (Exception e) {
             callbacks.printError("保存响应过滤配置失败: " + e.getMessage());
@@ -784,14 +918,96 @@ public class DouSqlConfig {
      * 加载响应过滤配置
      */
     public void loadResponseFilterConfig() {
-        try {
-            File configFile = new File(configDirectory, "response_filter.json");
-            if (configFile.exists()) {
-                // 这里可以实现 JSON 反序列化加载
-                callbacks.printOutput("响应过滤配置已加载");
+        File configFile = new File(configDirectory, "response_filter.properties");
+        if (!configFile.exists()) {
+            return;
+        }
+
+        Properties properties = new Properties();
+        try (FileInputStream inputStream = new FileInputStream(configFile)) {
+            properties.load(inputStream);
+
+            ResponseFilterConfig loadedConfig = new ResponseFilterConfig();
+            loadedConfig.setEnabled(Boolean.parseBoolean(properties.getProperty("enabled", "false")));
+            loadedConfig.setMatchAll(Boolean.parseBoolean(properties.getProperty("matchAll", "true")));
+            loadedConfig.clearConditions();
+
+            int conditionCount = Integer.parseInt(properties.getProperty("conditionCount", "0"));
+            for (int i = 0; i < conditionCount; i++) {
+                String typeName = properties.getProperty("condition." + i + ".type");
+                String operatorName = properties.getProperty("condition." + i + ".operator");
+                if (typeName == null || operatorName == null) {
+                    continue;
+                }
+
+                ResponseFilterConfig.FilterCondition condition = new ResponseFilterConfig.FilterCondition();
+                condition.setType(ResponseFilterConfig.FilterType.valueOf(typeName));
+                condition.setOperator(ResponseFilterConfig.CompareOperator.valueOf(operatorName));
+                condition.setValue(properties.getProperty("condition." + i + ".value", ""));
+                String headerName = properties.getProperty("condition." + i + ".headerName", "");
+                condition.setHeaderName(headerName.isEmpty() ? null : headerName);
+                condition.setEnabled(Boolean.parseBoolean(properties.getProperty("condition." + i + ".enabled", "true")));
+                loadedConfig.addCondition(condition);
             }
+
+            responseFilterConfig = loadedConfig;
+            callbacks.printOutput("响应过滤配置已加载");
         } catch (Exception e) {
             callbacks.printError("加载响应过滤配置失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 保存 SQLMap 配置
+     */
+    public void saveSqlmapConfig(String sqlmapPath, String pythonPath, String defaultOptions, String outputDirectory) {
+        this.sqlmapPath = sqlmapPath == null || sqlmapPath.trim().isEmpty() ? "sqlmap.py" : sqlmapPath.trim();
+        this.sqlmapPythonPath = pythonPath == null ? "" : pythonPath.trim();
+        this.sqlmapDefaultOptions = defaultOptions == null || defaultOptions.trim().isEmpty()
+                ? "-r {requestFile} -p {parameter} --batch --level 3 --risk 3 --ignore-stdin --output-dir={outputDir}"
+                : defaultOptions.trim();
+        this.sqlmapOutputDirectory = outputDirectory == null || outputDirectory.trim().isEmpty()
+                ? System.getProperty("java.io.tmpdir") + File.separator + "dousql-sqlmap"
+                : outputDirectory.trim();
+
+        Properties properties = new Properties();
+        properties.setProperty("sqlmapPath", this.sqlmapPath);
+        properties.setProperty("pythonPath", this.sqlmapPythonPath);
+        properties.setProperty("defaultOptions", this.sqlmapDefaultOptions);
+        properties.setProperty("outputDirectory", this.sqlmapOutputDirectory);
+
+        File outputDir = new File(this.sqlmapOutputDirectory);
+        if (!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+
+        try (FileOutputStream outputStream = new FileOutputStream(new File(configDirectory, "xia_SQL_sqlmap_config.ini"))) {
+            properties.store(outputStream, "DouSQL sqlmap config");
+            callbacks.printOutput("SQLMap 配置已保存");
+        } catch (IOException e) {
+            callbacks.printError("保存 SQLMap 配置失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 加载 SQLMap 配置
+     */
+    public void loadSqlmapConfig() {
+        File configFile = new File(configDirectory, "xia_SQL_sqlmap_config.ini");
+        if (!configFile.exists()) {
+            return;
+        }
+
+        Properties properties = new Properties();
+        try (FileInputStream inputStream = new FileInputStream(configFile)) {
+            properties.load(inputStream);
+            sqlmapPath = properties.getProperty("sqlmapPath", sqlmapPath).trim();
+            sqlmapPythonPath = properties.getProperty("pythonPath", sqlmapPythonPath).trim();
+            sqlmapDefaultOptions = properties.getProperty("defaultOptions", sqlmapDefaultOptions).trim();
+            sqlmapOutputDirectory = properties.getProperty("outputDirectory", sqlmapOutputDirectory).trim();
+            callbacks.printOutput("SQLMap 配置已加载");
+        } catch (IOException e) {
+            callbacks.printError("加载 SQLMap 配置失败: " + e.getMessage());
         }
     }
 }

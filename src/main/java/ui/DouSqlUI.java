@@ -6,10 +6,17 @@ import utils.LogEntry;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
@@ -44,6 +51,12 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     
     // 当前选中的扫描结果MD5，用于过滤payload详情显示
     private String currentSelectedScanMd5 = null;
+
+    // 行高亮颜色
+    private static final Color HIGHLIGHT_SCAN_VULNERABLE = new Color(255, 228, 228);
+    private static final Color HIGHLIGHT_PAYLOAD_BOOL = new Color(232, 245, 233);
+    private static final Color HIGHLIGHT_PAYLOAD_ERR = new Color(255, 249, 196);
+    private static final Color HIGHLIGHT_PAYLOAD_TIME = new Color(255, 228, 228);
     
     // 控制面板组件
     private JCheckBox enablePluginCheckBox;
@@ -372,6 +385,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         configTabs.addTab(burpExtender.i18n.getText("config.delay"), createDelayConfigPanel());
         configTabs.addTab(burpExtender.i18n.getText("config.append.params"), createAppendParamsPanel());
         configTabs.addTab(burpExtender.i18n.getText("config.advanced"), createAdvancedConfigPanel());
+        configTabs.addTab("SQLMap", createSqlmapConfigPanel());
         configTabs.addTab(burpExtender.i18n.getText("config.language"), createLanguagePanel());
         
         return configTabs;
@@ -648,7 +662,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         
         urlEncodeCheckBox.addItemListener(e -> {
             burpExtender.urlEncodeSpaces = urlEncodeCheckBox.isSelected();
-            callbacks.printOutput("空格URL编码: " + (burpExtender.urlEncodeSpaces ? "启用" : "禁用"));
+            callbacks.printOutput("空格替换为+: " + (burpExtender.urlEncodeSpaces ? "启用" : "禁用"));
         });
         
         emptyValueCheckBox.addItemListener(e -> {
@@ -862,8 +876,8 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             "说明：\n\n" +
             "【响应时间阈值】\n" +
             "• 用途：检测时间盲注，当响应时间超过此阈值时标记为TIME\n" +
-            "• 默认：2000毫秒(2秒)\n" +
-            "• 建议：根据目标服务器性能调整，一般设置为2000-5000毫秒\n" +
+            "• 默认：5000毫秒(5秒)\n" +
+            "• 建议：根据目标服务器性能调整，一般设置为3000-8000毫秒\n" +
             "• 注意：设置过小可能产生误报，设置过大可能遗漏漏洞\n\n" +
             "【请求超时时间】\n" +
             "• 用途：请求超时控制，超过此时间直接丢弃请求\n" +
@@ -1275,9 +1289,13 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     private Component createAppendParamsPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        Map<String, String> savedAppendParams = burpExtender.config.getAppendParams();
+        Set<String> savedTestableParams = new HashSet<>(burpExtender.config.getTestableAppendParams());
+        boolean savedAppendEnabled = burpExtender.config.isAppendParamsEnabled();
+        final boolean[] suppressAppendConfigSave = {false};
         
         // 顶部：启用追加参数复选框
-        JCheckBox enableAppendParamsCheckBox = new JCheckBox(burpExtender.i18n.getText("checkbox.enable.append.params"), false);
+        JCheckBox enableAppendParamsCheckBox = new JCheckBox(burpExtender.i18n.getText("checkbox.enable.append.params"), savedAppendEnabled);
         
         // 注册组件
         registerI18nComponent("checkbox.enable.append.params", enableAppendParamsCheckBox);
@@ -1301,11 +1319,17 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         JTextArea appendParamsTextArea = new JTextArea(12, 25);
         appendParamsTextArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         appendParamsTextArea.setBorder(BorderFactory.createLoweredBevelBorder());
-        appendParamsTextArea.setText(
-            "# 追加参数配置（格式：key:value，每行一个）\n" +
-            "# 示例：\n" +
-            "# token:abc123\n"
-        );
+        StringBuilder appendParamsInitialText = new StringBuilder();
+        appendParamsInitialText.append("# 追加参数配置（格式：key:value，每行一个）\n");
+        appendParamsInitialText.append("# 示例：\n");
+        appendParamsInitialText.append("# token:abc123\n");
+        if (!savedAppendParams.isEmpty()) {
+            appendParamsInitialText.append("\n");
+            for (Map.Entry<String, String> entry : savedAppendParams.entrySet()) {
+                appendParamsInitialText.append(entry.getKey()).append(":").append(entry.getValue()).append("\n");
+            }
+        }
+        appendParamsTextArea.setText(appendParamsInitialText.toString());
         
         JScrollPane leftScrollPane = new JScrollPane(appendParamsTextArea);
         leftScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
@@ -1368,58 +1392,10 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         
         // 保存配置的方法
         Runnable saveCurrentConfig = () -> {
-            if (enableAppendParamsCheckBox.isSelected()) {
-                // 解析参数文本
-                String paramText = appendParamsTextArea.getText().trim();
-                Map<String, String> currentParams = new HashMap<>();
-                
-                if (!paramText.isEmpty()) {
-                    String[] lines = paramText.split("\n");
-                    for (String line : lines) {
-                        line = line.trim();
-                        if (!line.isEmpty() && !line.startsWith("#")) {
-                            String[] parts = line.split(":", 2);
-                            if (parts.length == 2) {
-                                String key = parts[0].trim();
-                                String value = parts[1].trim();
-                                currentParams.put(key, value);
-                            }
-                        }
-                    }
-                }
-                
-                // 获取当前勾选的测试参数
-                Set<String> testableParams = new HashSet<>();
-                for (Component comp : paramTestPanel.getComponents()) {
-                    if (comp instanceof JCheckBox) {
-                        JCheckBox cb = (JCheckBox) comp;
-                        if (cb.isSelected()) {
-                            String text = cb.getText();
-                            String paramName = text.split(" \\(")[0]; // 提取参数名
-                            testableParams.add(paramName);
-                        }
-                    }
-                }
-                
-                // 保存到配置
-                burpExtender.config.saveAppendParamsConfig(true, currentParams, testableParams);
-                
-                // 调试信息
-                callbacks.printOutput("=== UI保存追加参数配置 ===");
-                callbacks.printOutput("参数数量: " + currentParams.size());
-                callbacks.printOutput("可测试参数数量: " + testableParams.size());
-                for (String testableParam : testableParams) {
-                    callbacks.printOutput("可测试参数: " + testableParam);
-                }
-                callbacks.printOutput("=== UI保存完成 ===");
+            if (suppressAppendConfigSave[0]) {
+                return;
             }
-        };
-        
-        // 动态参数映射方法
-        Runnable updateParameterCheckboxes = () -> {
-            // 清空现有的复选框
-            paramTestPanel.removeAll();
-            
+
             // 解析参数文本
             String paramText = appendParamsTextArea.getText().trim();
             Map<String, String> currentParams = new HashMap<>();
@@ -1439,34 +1415,90 @@ public class DouSqlUI implements ITab, IMessageEditorController {
                 }
             }
             
+            // 获取当前勾选的测试参数
+            Set<String> testableParams = new HashSet<>();
+            for (Component comp : paramTestPanel.getComponents()) {
+                if (comp instanceof JCheckBox) {
+                    JCheckBox cb = (JCheckBox) comp;
+                    if (cb.isSelected()) {
+                        String text = cb.getText();
+                        String paramName = text.split(" \\(")[0];
+                        testableParams.add(paramName);
+                    }
+                }
+            }
+
+            savedTestableParams.clear();
+            savedTestableParams.addAll(testableParams);
+            
+            burpExtender.config.saveAppendParamsConfig(enableAppendParamsCheckBox.isSelected(), currentParams, testableParams);
+            
+            callbacks.printOutput("=== UI保存追加参数配置 ===");
+            callbacks.printOutput("启用状态: " + enableAppendParamsCheckBox.isSelected());
+            callbacks.printOutput("参数数量: " + currentParams.size());
+            callbacks.printOutput("可测试参数数量: " + testableParams.size());
+            for (String testableParam : testableParams) {
+                callbacks.printOutput("可测试参数: " + testableParam);
+            }
+            callbacks.printOutput("=== UI保存完成 ===");
+        };
+        
+        // 动态参数映射方法
+        Runnable updateParameterCheckboxes = () -> {
+            Set<String> selectedParams = new HashSet<>();
+            for (Component comp : paramTestPanel.getComponents()) {
+                if (comp instanceof JCheckBox) {
+                    JCheckBox cb = (JCheckBox) comp;
+                    if (cb.isSelected()) {
+                        String text = cb.getText();
+                        selectedParams.add(text.split(" \\(")[0]);
+                    }
+                }
+            }
+            if (selectedParams.isEmpty()) {
+                selectedParams.addAll(savedTestableParams);
+            }
+
+            // 清空现有的复选框
+            paramTestPanel.removeAll();
+            
+            // 解析参数文本
+            String currentParamText = appendParamsTextArea.getText().trim();
+            Map<String, String> currentParams = new HashMap<>();
+            
+            if (!currentParamText.isEmpty()) {
+                String[] lines = currentParamText.split("\n");
+                for (String line : lines) {
+                    line = line.trim();
+                    if (!line.isEmpty() && !line.startsWith("#")) {
+                        String[] parts = line.split(":", 2);
+                        if (parts.length == 2) {
+                            String key = parts[0].trim();
+                            String value = parts[1].trim();
+                            currentParams.put(key, value);
+                        }
+                    }
+                }
+            }
+            
             if (currentParams.isEmpty()) {
-                // 没有参数时显示提示
-                JLabel noParamsLabel = new JLabel();
+                JLabel noParamsLabel = new JLabel(burpExtender.i18n.getText("label.append.params.hint"));
                 noParamsLabel.setBorder(BorderFactory.createEmptyBorder(10, 5, 5, 5));
                 paramTestPanel.add(noParamsLabel);
             } else {
-                // 为每个参数创建复选框，并添加事件监听器
                 for (Map.Entry<String, String> entry : currentParams.entrySet()) {
                     String paramName = entry.getKey();
                     String paramValue = entry.getValue();
-                    JCheckBox paramCheckBox = new JCheckBox(burpExtender.i18n.getText("checkbox.param.test", paramName, paramValue), false);
+                    JCheckBox paramCheckBox = new JCheckBox(burpExtender.i18n.getText("checkbox.param.test", paramName, paramValue), selectedParams.contains(paramName));
                     paramCheckBox.setToolTipText("勾选后该参数会参与payload测试");
-                    
-                    // 添加复选框状态变化监听器
-                    paramCheckBox.addItemListener(e -> {
-                        // 当复选框状态变化时，保存配置
-                        SwingUtilities.invokeLater(saveCurrentConfig);
-                    });
-                    
+                    paramCheckBox.addItemListener(e -> SwingUtilities.invokeLater(saveCurrentConfig));
                     paramTestPanel.add(paramCheckBox);
                 }
             }
             
-            // 刷新界面
             paramTestPanel.revalidate();
             paramTestPanel.repaint();
             
-            // 保存当前配置（如果启用了功能）
             saveCurrentConfig.run();
         };
         
@@ -1484,8 +1516,8 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             } else {
                 // 禁用时：文本框可编辑，背景变白
                 appendParamsTextArea.setBackground(Color.WHITE);
-                // 保存禁用状态，但不清空右侧面板
-                burpExtender.config.saveAppendParamsConfig(false, new HashMap<>(), new HashSet<>());
+                // 保存禁用状态，但保留已有配置内容
+                saveCurrentConfig.run();
             }
         });
         
@@ -1517,6 +1549,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             
             if (result == JOptionPane.YES_OPTION) {
                 try {
+                    suppressAppendConfigSave[0] = true;
                     // 清除配置
                     burpExtender.config.clearAppendParamsConfig();
                     
@@ -1545,13 +1578,14 @@ public class DouSqlUI implements ITab, IMessageEditorController {
                         
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(panel, "清除失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    suppressAppendConfigSave[0] = false;
                 }
             }
         });
         
-        // 初始化状态 - 默认未启用，文本框可编辑，背景为白色
-        appendParamsTextArea.setEditable(true);
-        appendParamsTextArea.setBackground(Color.WHITE);
+        appendParamsTextArea.setEditable(!savedAppendEnabled);
+        appendParamsTextArea.setBackground(savedAppendEnabled ? Color.LIGHT_GRAY : Color.WHITE);
         
         // 初始化时更新参数映射显示
         SwingUtilities.invokeLater(updateParameterCheckboxes);
@@ -1574,15 +1608,19 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     private Component createDelayConfigPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        int savedDelayMode = burpExtender.config.getDelayMode();
+        int savedFixedDelay = burpExtender.config.getFixedDelay();
+        int savedRandomDelayMin = burpExtender.config.getRandomDelayMin();
+        int savedRandomDelayMax = burpExtender.config.getRandomDelayMax();
         
         // 延时模式选择
         JPanel delayModePanel = new JPanel(new GridLayout(3, 1, 5, 5));
         delayModePanel.setBorder(BorderFactory.createTitledBorder("延时模式"));
         
         ButtonGroup delayModeGroup = new ButtonGroup();
-        JRadioButton noDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.none"), true);
-        JRadioButton fixedDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.fixed"), false);
-        JRadioButton randomDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.random"), false);
+        JRadioButton noDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.none"), savedDelayMode == 0);
+        JRadioButton fixedDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.fixed"), savedDelayMode == 1);
+        JRadioButton randomDelayRadio = new JRadioButton(burpExtender.i18n.getText("delay.mode.random"), savedDelayMode == 2);
         
         // 注册延时模式选项
         registerI18nComponent("delay.mode.none", noDelayRadio);
@@ -1609,7 +1647,7 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         JLabel fixedDelayLabel = new JLabel(burpExtender.i18n.getText("label.fixed.delay"));
         delaySettingsPanel.add(fixedDelayLabel, gbcDelay);
         gbcDelay.gridx = 1;
-        JTextField fixedDelayField = new JTextField("1000", 10);
+        JTextField fixedDelayField = new JTextField(String.valueOf(savedFixedDelay), 10);
         delaySettingsPanel.add(fixedDelayField, gbcDelay);
         
         // 随机延时配置
@@ -1617,14 +1655,14 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         JLabel randomDelayMinLabel = new JLabel(burpExtender.i18n.getText("label.random.delay.min"));
         delaySettingsPanel.add(randomDelayMinLabel, gbcDelay);
         gbcDelay.gridx = 1;
-        JTextField randomDelayMinField = new JTextField("1000", 10);
+        JTextField randomDelayMinField = new JTextField(String.valueOf(savedRandomDelayMin), 10);
         delaySettingsPanel.add(randomDelayMinField, gbcDelay);
         
         gbcDelay.gridx = 0; gbcDelay.gridy = 2;
         JLabel randomDelayMaxLabel = new JLabel(burpExtender.i18n.getText("label.random.delay.max"));
         delaySettingsPanel.add(randomDelayMaxLabel, gbcDelay);
         gbcDelay.gridx = 1;
-        JTextField randomDelayMaxField = new JTextField("5000", 10);
+        JTextField randomDelayMaxField = new JTextField(String.valueOf(savedRandomDelayMax), 10);
         delaySettingsPanel.add(randomDelayMaxField, gbcDelay);
         
         // 注册组件
@@ -1696,16 +1734,15 @@ public class DouSqlUI implements ITab, IMessageEditorController {
                     return;
                 }
                 
-                // 设置配置（仅内存，不持久化）
+                // 设置配置并持久化
                 burpExtender.config.setDelayConfig(mode, fixed, minRandom, maxRandom);
                 
                 String modeText = mode == 0 ? "无延时" : (mode == 1 ? "固定延时" : "随机延时");
                 JOptionPane.showMessageDialog(panel, 
-                    "延时配置已应用（仅本次会话有效）！\n" +
+                    "延时配置已保存！\n" +
                     "延时模式: " + modeText + "\n" +
                     "固定延时: " + fixed + "ms\n" +
-                    "随机延时: " + minRandom + "-" + maxRandom + "ms\n\n" +
-                    "注意：延时配置不会持久化保存，重启插件后恢复默认（无延时）", 
+                    "随机延时: " + minRandom + "-" + maxRandom + "ms", 
                     "成功", JOptionPane.INFORMATION_MESSAGE);
                     
             } catch (NumberFormatException ex) {
@@ -1715,10 +1752,9 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             }
         });
         
-        // 初始化状态
-        fixedDelayField.setEnabled(false);
-        randomDelayMinField.setEnabled(false);
-        randomDelayMaxField.setEnabled(false);
+        fixedDelayField.setEnabled(savedDelayMode == 1);
+        randomDelayMinField.setEnabled(savedDelayMode == 2);
+        randomDelayMaxField.setEnabled(savedDelayMode == 2);
         
         panel.add(delayModePanel, BorderLayout.NORTH);
         panel.add(delaySettingsPanel, BorderLayout.CENTER);
@@ -1796,6 +1832,142 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         
         return new JScrollPane(panel);
     }
+
+    /**
+     * 创建 SQLMap 配置面板
+     */
+    private Component createSqlmapConfigPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        JTextField sqlmapPathField = new JTextField(burpExtender.config.getSqlmapPath(), 28);
+        JTextField pythonPathField = new JTextField(burpExtender.config.getSqlmapPythonPath(), 28);
+        JTextField outputDirField = new JTextField(burpExtender.config.getSqlmapOutputDirectory(), 28);
+        JTextArea defaultOptionsArea = new JTextArea(burpExtender.config.getSqlmapDefaultOptions(), 5, 28);
+        defaultOptionsArea.setLineWrap(true);
+        defaultOptionsArea.setWrapStyleWord(true);
+
+        int row = 0;
+
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
+        panel.add(new JLabel("SQLMap 路径"), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        panel.add(sqlmapPathField, gbc);
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        JButton browseSqlmapButton = new JButton("浏览");
+        browseSqlmapButton.addActionListener(e -> chooseFile(sqlmapPathField, false));
+        panel.add(browseSqlmapButton, gbc);
+
+        row++;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        panel.add(new JLabel("Python 路径"), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        panel.add(pythonPathField, gbc);
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        JButton browsePythonButton = new JButton("浏览");
+        browsePythonButton.addActionListener(e -> chooseFile(pythonPathField, false));
+        panel.add(browsePythonButton, gbc);
+
+        row++;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        panel.add(new JLabel("输出目录"), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        panel.add(outputDirField, gbc);
+        gbc.gridx = 2;
+        gbc.weightx = 0;
+        JButton browseOutputButton = new JButton("浏览");
+        browseOutputButton.addActionListener(e -> chooseFile(outputDirField, true));
+        panel.add(browseOutputButton, gbc);
+
+        row++;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        panel.add(new JLabel("默认命令参数"), gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        panel.add(new JScrollPane(defaultOptionsArea), gbc);
+        gbc.gridwidth = 1;
+        gbc.anchor = GridBagConstraints.WEST;
+
+        row++;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.gridwidth = 3;
+        JTextArea helpText = new JTextArea(
+            "占位符说明:\n" +
+            "{requestFile} - 临时生成的原始请求文件\n" +
+            "{parameter} - 当前详情行对应的参数名\n" +
+            "{outputDir} - SQLMap 输出目录\n\n" +
+            "推荐默认参数:\n" +
+            "-r {requestFile} -p {parameter} --batch --level 3 --risk 3 --ignore-stdin --output-dir={outputDir}"
+        );
+        helpText.setEditable(false);
+        helpText.setBackground(panel.getBackground());
+        helpText.setBorder(BorderFactory.createTitledBorder("说明"));
+        panel.add(helpText, gbc);
+        gbc.gridwidth = 1;
+
+        row++;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.gridwidth = 3;
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JButton saveButton = new JButton("保存 SQLMap 配置");
+        JButton resetButton = new JButton("恢复默认");
+        saveButton.addActionListener(e -> {
+            burpExtender.config.saveSqlmapConfig(
+                sqlmapPathField.getText(),
+                pythonPathField.getText(),
+                defaultOptionsArea.getText(),
+                outputDirField.getText()
+            );
+            JOptionPane.showMessageDialog(panel, "SQLMap 配置已保存", "成功", JOptionPane.INFORMATION_MESSAGE);
+        });
+        resetButton.addActionListener(e -> {
+            sqlmapPathField.setText("sqlmap.py");
+            pythonPathField.setText("python3");
+            outputDirField.setText(System.getProperty("java.io.tmpdir") + File.separator + "dousql-sqlmap");
+            defaultOptionsArea.setText("-r {requestFile} -p {parameter} --batch --level 3 --risk 3 --ignore-stdin --output-dir={outputDir}");
+        });
+        buttonPanel.add(saveButton);
+        buttonPanel.add(resetButton);
+        panel.add(buttonPanel, gbc);
+
+        row++;
+        gbc.gridy = row;
+        gbc.weighty = 1.0;
+        panel.add(new JPanel(), gbc);
+
+        return new JScrollPane(panel);
+    }
+
+    private void chooseFile(JTextField targetField, boolean directoriesOnly) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileSelectionMode(directoriesOnly ? JFileChooser.DIRECTORIES_ONLY : JFileChooser.FILES_ONLY);
+        String currentValue = targetField.getText().trim();
+        if (!currentValue.isEmpty()) {
+            chooser.setSelectedFile(new File(currentValue));
+        }
+        if (chooser.showOpenDialog(mainSplitPane) == JFileChooser.APPROVE_OPTION) {
+            targetField.setText(chooser.getSelectedFile().getAbsolutePath());
+        }
+    }
     
     /**
      * 设置控制面板事件监听器
@@ -1836,6 +2008,10 @@ public class DouSqlUI implements ITab, IMessageEditorController {
         synchronized (payloadDetails) {
             payloadDetails.clear();
         }
+
+        burpExtender.processedRequestFingerprints.clear();
+        burpExtender.processedUrls.clear();
+        burpExtender.originalResponseLengths.clear();
         
         // 清空选中状态
         currentSelectedScanMd5 = null;
@@ -2084,6 +2260,12 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     private class ScanResultsTable extends JTable {
         public ScanResultsTable(TableModel model) {
             super(model);
+
+            setRowSelectionAllowed(true);
+            setColumnSelectionAllowed(false);
+            setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            setSelectionBackground(new Color(255, 236, 179));
+            setSelectionForeground(Color.BLACK);
             
             // 设置列宽 - 根据用户要求调整
             if (getColumnModel().getColumnCount() >= 6) {
@@ -2095,6 +2277,24 @@ public class DouSqlUI implements ITab, IMessageEditorController {
                 getColumnModel().getColumn(4).setPreferredWidth(80);  // 时间 - 保持
                 getColumnModel().getColumn(5).setPreferredWidth(50);  // 来源 - 缩减一半 (原100)
             }
+        }
+
+        @Override
+        public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+            Component component = super.prepareRenderer(renderer, row, column);
+            if (isRowSelected(row)) {
+                component.setBackground(getSelectionBackground());
+                component.setForeground(getSelectionForeground());
+            } else {
+                int modelRow = convertRowIndexToModel(row);
+                LogEntry entry = (modelRow >= 0 && modelRow < scanResults.size()) ? scanResults.get(modelRow) : null;
+                Color rowColor = (entry != null && isVulnerableScanState(entry.getState()))
+                    ? HIGHLIGHT_SCAN_VULNERABLE
+                    : getBackground();
+                component.setBackground(rowColor);
+                component.setForeground(getForeground());
+            }
+            return component;
         }
         
         @Override
@@ -2150,6 +2350,23 @@ public class DouSqlUI implements ITab, IMessageEditorController {
     private class PayloadDetailsTable extends JTable {
         public PayloadDetailsTable(TableModel model) {
             super(model);
+        }
+
+        @Override
+        public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+            Component component = super.prepareRenderer(renderer, row, column);
+            if (isRowSelected(row)) {
+                component.setBackground(getSelectionBackground());
+                component.setForeground(getSelectionForeground());
+            } else {
+                int modelRow = convertRowIndexToModel(row);
+                List<LogEntry> filteredDetails = getFilteredPayloadDetails();
+                LogEntry entry = (modelRow >= 0 && modelRow < filteredDetails.size()) ? filteredDetails.get(modelRow) : null;
+                Color rowColor = getPayloadDetailRowColor(entry);
+                component.setBackground(rowColor != null ? rowColor : getBackground());
+                component.setForeground(getForeground());
+            }
+            return component;
         }
         
         @Override
@@ -2265,6 +2482,264 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             callbacks.printError("HTTP编辑器测试失败: " + e.getMessage());
         }
     }
+
+    private boolean isVulnerableScanState(String state) {
+        if (state == null || state.trim().isEmpty()) {
+            return false;
+        }
+
+        String normalized = state.toLowerCase(Locale.ROOT);
+        return normalized.contains("time")
+                || normalized.contains("err")
+                || normalized.contains("diff")
+                || normalized.contains("bool");
+    }
+
+    private Color getPayloadDetailRowColor(LogEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+
+        String change = entry.getChange();
+        if (change == null || change.trim().isEmpty()) {
+            return null;
+        }
+
+        String normalized = change.toLowerCase(Locale.ROOT);
+        if (normalized.contains("time >")) {
+            return HIGHLIGHT_PAYLOAD_TIME;
+        }
+        if (normalized.contains("err!")) {
+            return HIGHLIGHT_PAYLOAD_ERR;
+        }
+        if (normalized.contains("diff")) {
+            return HIGHLIGHT_PAYLOAD_BOOL;
+        }
+
+        return null;
+    }
+
+    private List<LogEntry> getFilteredPayloadDetails() {
+        if (currentSelectedScanMd5 == null) {
+            return new ArrayList<>(payloadDetails);
+        }
+
+        List<LogEntry> filtered = new ArrayList<>();
+        synchronized (payloadDetails) {
+            for (LogEntry detail : payloadDetails) {
+                if (currentSelectedScanMd5.equals(detail.getDataMd5())) {
+                    filtered.add(detail);
+                }
+            }
+        }
+        return filtered;
+    }
+
+    private void sendPayloadToSqlmap(LogEntry entry) {
+        IHttpRequestResponse originalRequestResponse = getOriginalRequestResponseForPayload(entry);
+        if (entry == null || originalRequestResponse == null || originalRequestResponse.getRequest() == null) {
+            JOptionPane.showMessageDialog(mainSplitPane, "当前记录没有可用的原始请求，无法发送到 SQLMap", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        String sqlmapPath = burpExtender.config.getSqlmapPath();
+        if (sqlmapPath == null || sqlmapPath.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(mainSplitPane, "请先在 SQLMap 配置页设置 SQLMap 路径", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        String outputDirPath = burpExtender.config.getSqlmapOutputDirectory();
+        File outputDir = new File(outputDirPath);
+        if (!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+
+        try {
+            String safeParam = sanitizeFileName(entry.getParameter().isEmpty() ? "request" : entry.getParameter());
+            File requestFile = File.createTempFile("dousql_" + safeParam + "_", ".txt");
+            Files.write(requestFile.toPath(), normalizeRequestForSqlmap(originalRequestResponse.getRequest()));
+
+            String finalCommand = buildSqlmapCommand(entry, requestFile, outputDir);
+            showCommandOutputWindow("SQLMap - " + entry.getParameter(), finalCommand, requestFile);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(mainSplitPane, "生成 SQLMap 请求文件失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private IHttpRequestResponse getOriginalRequestResponseForPayload(LogEntry payloadEntry) {
+        if (payloadEntry == null) {
+            return null;
+        }
+
+        synchronized (scanResults) {
+            for (LogEntry scanEntry : scanResults) {
+                if (payloadEntry.getDataMd5().equals(scanEntry.getDataMd5())) {
+                    return scanEntry.getRequestResponse();
+                }
+            }
+        }
+
+        return payloadEntry.getRequestResponse();
+    }
+
+    private String buildSqlmapCommand(LogEntry entry, File requestFile, File outputDir) {
+        String options = burpExtender.config.getSqlmapDefaultOptions();
+        if (!options.contains("--level")) {
+            options = options + " --level 3";
+        }
+        if (!options.contains("--risk")) {
+            options = options + " --risk 3";
+        }
+        if (!options.contains("--ignore-stdin")) {
+            options = options + " --ignore-stdin";
+        }
+        String expandedOptions = options
+            .replace("{requestFile}", shellQuote(requestFile.getAbsolutePath()))
+            .replace("{parameter}", shellQuote(entry.getParameter()))
+            .replace("{outputDir}", shellQuote(outputDir.getAbsolutePath()));
+
+        String sqlmapBinary;
+        String pythonPath = burpExtender.config.getSqlmapPythonPath();
+        if (pythonPath == null || pythonPath.trim().isEmpty()) {
+            sqlmapBinary = shellQuote(burpExtender.config.getSqlmapPath());
+        } else {
+            sqlmapBinary = shellQuote(pythonPath) + " " + shellQuote(burpExtender.config.getSqlmapPath());
+        }
+
+        return sqlmapBinary + " " + expandedOptions;
+    }
+
+    private void showCommandOutputWindow(String title, String command, File requestFile) {
+        JDialog dialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(mainSplitPane), title, false);
+        dialog.setLayout(new BorderLayout(8, 8));
+
+        JTextArea outputArea = new JTextArea();
+        outputArea.setEditable(false);
+        outputArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        outputArea.setText("$ " + command + "\n\n" + "request file: " + requestFile.getAbsolutePath() + "\n\n");
+
+        JScrollPane scrollPane = new JScrollPane(outputArea);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton closeButton = new JButton("关闭");
+        JButton openOutputDirButton = new JButton("打开输出目录");
+        buttonPanel.add(openOutputDirButton);
+        buttonPanel.add(closeButton);
+
+        dialog.add(scrollPane, BorderLayout.CENTER);
+        dialog.add(buttonPanel, BorderLayout.SOUTH);
+        dialog.setSize(900, 560);
+        dialog.setLocationRelativeTo(mainSplitPane);
+
+        final Process[] processRef = new Process[1];
+
+        openOutputDirButton.addActionListener(e -> {
+            try {
+                Desktop.getDesktop().open(new File(burpExtender.config.getSqlmapOutputDirectory()));
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, "无法打开输出目录: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        closeButton.addActionListener(e -> {
+            if (processRef[0] != null && processRef[0].isAlive()) {
+                processRef[0].destroy();
+            }
+            dialog.dispose();
+        });
+
+        dialog.setVisible(true);
+
+        Thread worker = new Thread(() -> {
+            Process process = null;
+            try {
+                ProcessBuilder processBuilder = createShellProcessBuilder(command);
+                processBuilder.redirectErrorStream(true);
+                processRef[0] = processBuilder.start();
+                process = processRef[0];
+                process.getOutputStream().close();
+
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String currentLine = line;
+                        SwingUtilities.invokeLater(() -> {
+                            outputArea.append(currentLine + "\n");
+                            outputArea.setCaretPosition(outputArea.getDocument().getLength());
+                        });
+                    }
+                }
+
+                int exitCode = process.waitFor();
+                final int finalExitCode = exitCode;
+                SwingUtilities.invokeLater(() -> {
+                    outputArea.append("\n[process exited] code=" + finalExitCode + "\n");
+                    outputArea.setCaretPosition(outputArea.getDocument().getLength());
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    outputArea.append("\n[error] " + ex.getMessage() + "\n");
+                    outputArea.setCaretPosition(outputArea.getDocument().getLength());
+                });
+            } finally {
+                if (process != null && process.isAlive()) {
+                    process.destroy();
+                }
+            }
+        }, "sqlmap-runner");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private ProcessBuilder createShellProcessBuilder(String command) {
+        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (osName.contains("win")) {
+            return new ProcessBuilder("cmd.exe", "/c", command);
+        }
+        return new ProcessBuilder("/bin/sh", "-c", "exec " + command);
+    }
+
+    private String shellQuote(String value) {
+        if (value == null) {
+            return "''";
+        }
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
+    private String sanitizeFileName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return "request";
+        }
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private byte[] normalizeRequestForSqlmap(byte[] requestBytes) {
+        if (requestBytes == null || requestBytes.length == 0) {
+            return new byte[0];
+        }
+
+        String requestText = new String(requestBytes, StandardCharsets.UTF_8);
+        String normalized = requestText.replace("\r\n", "\n").replace('\r', '\n');
+        String[] parts = normalized.split("\n\n", 2);
+        String headerPart = parts.length > 0 ? parts[0] : normalized;
+        String bodyPart = parts.length > 1 ? parts[1] : "";
+
+        String[] headerLines = headerPart.split("\n");
+        if (headerLines.length > 0 && headerLines[0].contains("HTTP/2")) {
+            headerLines[0] = headerLines[0].replace("HTTP/2", "HTTP/1.1");
+        }
+
+        StringBuilder rebuilt = new StringBuilder();
+        for (int i = 0; i < headerLines.length; i++) {
+            rebuilt.append(headerLines[i].trim()).append("\r\n");
+        }
+        rebuilt.append("\r\n");
+        if (!bodyPart.isEmpty()) {
+            rebuilt.append(bodyPart);
+        }
+
+        return rebuilt.toString().getBytes(StandardCharsets.UTF_8);
+    }
     
     // ========== 其他必要方法 ==========
     
@@ -2346,8 +2821,13 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             int selectedRow = table.getSelectedRow();
             if (selectedRow >= 0) {
                 int modelRow = table.convertRowIndexToModel(selectedRow);
-                if (modelRow >= 0 && modelRow < payloadDetails.size()) {
-                    deletePayloadResult(modelRow);
+                List<LogEntry> filteredDetails = getFilteredPayloadDetails();
+                if (modelRow >= 0 && modelRow < filteredDetails.size()) {
+                    LogEntry entry = filteredDetails.get(modelRow);
+                    int rawIndex = payloadDetails.indexOf(entry);
+                    if (rawIndex >= 0) {
+                        deletePayloadResult(rawIndex);
+                    }
                 }
             }
         });
@@ -2358,15 +2838,29 @@ public class DouSqlUI implements ITab, IMessageEditorController {
             int selectedRow = table.getSelectedRow();
             if (selectedRow >= 0) {
                 int modelRow = table.convertRowIndexToModel(selectedRow);
-                if (modelRow >= 0 && modelRow < payloadDetails.size()) {
-                    LogEntry entry = payloadDetails.get(modelRow);
+                List<LogEntry> filteredDetails = getFilteredPayloadDetails();
+                if (modelRow >= 0 && modelRow < filteredDetails.size()) {
+                    LogEntry entry = filteredDetails.get(modelRow);
                     retestPayload(entry);
+                }
+            }
+        });
+
+        JMenuItem sendToSqlmapItem = new JMenuItem("发送到 SQLMap");
+        sendToSqlmapItem.addActionListener(e -> {
+            int selectedRow = table.getSelectedRow();
+            if (selectedRow >= 0) {
+                int modelRow = table.convertRowIndexToModel(selectedRow);
+                List<LogEntry> filteredDetails = getFilteredPayloadDetails();
+                if (modelRow >= 0 && modelRow < filteredDetails.size()) {
+                    sendPayloadToSqlmap(filteredDetails.get(modelRow));
                 }
             }
         });
         
         contextMenu.add(deletePayloadItem);
         contextMenu.add(retestPayloadItem);
+        contextMenu.add(sendToSqlmapItem);
         
         // 添加右键菜单到表格
         table.setComponentPopupMenu(contextMenu);

@@ -39,7 +39,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, IContextMenuF
     
     // 扩展信息
     public static final String EXTENSION_NAME = "DouSQL-AnQuanYa";
-    public static final String VERSION = "3.0.8";
+    public static final String VERSION = "3.0.9";
     
     // 配置变量
     public volatile boolean isEnabled = true;
@@ -54,7 +54,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, IContextMenuF
     
     // 自定义payload配置变量
     public volatile boolean customPayloadEnabled = false; // 自定义payload开关
-    public volatile boolean urlEncodeSpaces = true; // 空格URL编码开关
+    public volatile boolean urlEncodeSpaces = true; // 空格替换为+开关
     public volatile boolean emptyParameterValues = false; // 参数值置空开关
     
     // 白名单配置
@@ -63,6 +63,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, IContextMenuF
     
     // 线程安全的数据存储
     public Set<String> processedUrls = ConcurrentHashMap.newKeySet();
+    public Set<String> processedRequestFingerprints = ConcurrentHashMap.newKeySet();
     public Map<String, Integer> originalResponseLengths = new ConcurrentHashMap<>();
     
     @Override
@@ -114,19 +115,6 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, IContextMenuF
     private void initializeConfig() {
         this.config = new DouSqlConfig(this);
         config.loadAllConfigs();
-        
-        // // 确保追加参数功能默认禁用
-        // callbacks.printOutput("=== 初始化后追加参数状态检查 ===");
-        // callbacks.printOutput("追加参数启用状态: " + config.isAppendParamsEnabled());
-        // callbacks.printOutput("追加参数数量: " + config.getAppendParams().size());
-        // callbacks.printOutput("可测试追加参数数量: " + config.getTestableAppendParams().size());
-        
-        // 强制确保禁用状态
-        if (config.isAppendParamsEnabled()) {
-            //callbacks.printOutput("检测到追加参数被意外启用，强制禁用...");
-            config.clearAppendParamsConfig();
-        }
-        //callbacks.printOutput("=== 追加参数状态检查完成 ===");
     }
     
     /**

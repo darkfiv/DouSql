@@ -69,11 +69,22 @@ public class HttpUtils {
             callbacks.printOutput("URL: " + url);
             callbacks.printOutput("方法: " + method);
             callbacks.printOutput("工具标识: " + toolFlag + " (" + getToolName(toolFlag) + ")");
+
+            // 预检查：没有可测试参数时，不展示扫描结果
+            if (!hasTestableParameters(requestResponse, requestInfo)) {
+                callbacks.printOutput("无可测试参数，跳过展示与测试: " + method + " " + url);
+                return;
+            }
+
+            // 去重：相同方法+路径+参数结构只测试一次
+            String requestFingerprint = generateRequestFingerprint(requestInfo);
+            if (!burpExtender.processedRequestFingerprints.add(requestFingerprint)) {
+                callbacks.printOutput("命中去重规则，跳过重复测试: " + requestFingerprint);
+                return;
+            }
             
             // 生成MD5标识
             String dataMd5 = generateMd5(url + "+" + method + "+" + System.currentTimeMillis());
-            
-            // 移除去重检查，允许重复处理
             callbacks.printOutput("生成MD5标识: " + dataMd5);
             
             // 添加到已处理列表（用于统计，不用于去重）
@@ -418,7 +429,22 @@ public class HttpUtils {
                 String paramType = getParameterTypeName(param.getType());
                 callbacks.printOutput("测试参数: " + param.getName() + " (类型: " + param.getType() + " - " + paramType + ", 值: " + param.getValue() + ")");
                 
-                for (String payload : payloads) {
+                // 数字参数处理：如果启用，给当前参数追加 -1 / -0 payload
+                List<String> payloadsForParam = payloads;
+                if (burpExtender.processNumbers && isPureNumber(param.getValue())) {
+                    List<String> enrichedPayloads = new ArrayList<>(payloads.size() + 2);
+                    if (!payloads.contains("-1")) {
+                        enrichedPayloads.add("-1");
+                    }
+                    if (!payloads.contains("-0")) {
+                        enrichedPayloads.add("-0");
+                    }
+                    enrichedPayloads.addAll(payloads);
+                    payloadsForParam = enrichedPayloads;
+                    callbacks.printOutput("数字参数已追加payload -1/-0: " + param.getName());
+                }
+                
+                for (String payload : payloadsForParam) {
                     // 检查扫描是否被暂停（只检查特定请求暂停）
                     if (burpExtender.pausedRequests.contains(dataMd5)) {
                         callbacks.printOutput("扫描已暂停，停止payload测试");
@@ -512,11 +538,11 @@ public class HttpUtils {
         
         String processedPayload = originalPayload;
         
-        // 处理空格URL编码 - 独立于customPayloadEnabled，只要urlEncodeSpaces启用就执行
+        // 处理空格替换为+ - 独立于customPayloadEnabled，只要urlEncodeSpaces启用就执行
         if (burpExtender.urlEncodeSpaces) {
             // callbacks.printOutput("    [processCustomPayload] 执行空格编码...");
             // callbacks.printOutput("    [processCustomPayload] 编码前: [" + processedPayload + "]");
-            processedPayload = processedPayload.replace(" ", "%20");
+            processedPayload = processedPayload.replace(" ", "+");
             //callbacks.printOutput("    [processCustomPayload] 编码后: [" + processedPayload + "]");
         } else {
             //callbacks.printOutput("    [processCustomPayload] 跳过空格编码（urlEncodeSpaces=false）");
@@ -581,6 +607,17 @@ public class HttpUtils {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    /**
+     * 检查是否为纯数字（只包含0-9）
+     */
+    private boolean isPureNumber(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmedValue = value.trim();
+        return !trimmedValue.isEmpty() && trimmedValue.matches("[0-9]+");
     }
     
     /**
@@ -1241,7 +1278,12 @@ public class HttpUtils {
             callbacks.printOutput("  -> 新值: " + newValue);
             
             // 检查原始值的类型
-            boolean originalIsNumber = isNumericValue(originalValue);
+            // 注意：JSON 中 "id":"1" 这种字符串数字不能按数字处理
+            boolean originalIsQuotedString = java.util.regex.Pattern
+                    .compile("\"" + escapeRegex(paramName) + "\"\\s*:\\s*\"")
+                    .matcher(jsonBody)
+                    .find();
+            boolean originalIsNumber = !originalIsQuotedString && isNumericValue(originalValue);
             boolean originalIsArray = originalValue.trim().startsWith("[") && originalValue.trim().endsWith("]");
             boolean originalIsObject = originalValue.trim().startsWith("{") && originalValue.trim().endsWith("}");
             boolean originalIsString = !originalIsNumber && !originalIsArray && !originalIsObject;
@@ -1253,6 +1295,7 @@ public class HttpUtils {
             
             callbacks.printOutput("  -> 原始值类型: 数字=" + originalIsNumber + ", 数组=" + originalIsArray + 
                                 ", 对象=" + originalIsObject + ", 字符串=" + originalIsString);
+            callbacks.printOutput("  -> 原始值是否JSON字符串: " + originalIsQuotedString);
             callbacks.printOutput("  -> 新值类型: 数字=" + newValueIsNumber + ", 数组=" + newValueIsArray + 
                                 ", 对象=" + newValueIsObject);
             
@@ -1336,20 +1379,25 @@ public class HttpUtils {
                 }
             }
             
-            // 如果精确匹配失败，尝试直接字符串替换（作为最后手段）
+            // 如果精确匹配失败，尝试参数级兜底替换（只替换当前参数，避免误改其它同值参数）
             if (!originalValue.isEmpty()) {
-                callbacks.printOutput("  -> 所有模式匹配失败，尝试最后的直接替换");
+                callbacks.printOutput("  -> 所有模式匹配失败，尝试参数级兜底替换");
                 String finalReplacement;
                 if (newValueIsNumber || newValueIsArray || newValueIsObject) {
                     finalReplacement = newValue;
                 } else {
                     finalReplacement = "\"" + escapeJsonValue(newValue) + "\"";
                 }
-                
-                result = jsonBody.replace(":" + originalValue, ":" + finalReplacement);
-                if (!result.equals(jsonBody)) {
-                    callbacks.printOutput("  -> 直接字符串替换成功");
-                    return result;
+
+                String fallbackPattern = "(\"" + escapeRegex(paramName) + "\"\\s*:\\s*)(\"[^\"]*\"|\\[[^\\]]*\\]|\\{[^\\}]*\\}|[^,}\\]]+)";
+                java.util.regex.Matcher fallbackMatcher = java.util.regex.Pattern.compile(fallbackPattern).matcher(jsonBody);
+                if (fallbackMatcher.find()) {
+                    String newSegment = fallbackMatcher.group(1) + finalReplacement;
+                    result = fallbackMatcher.replaceFirst(java.util.regex.Matcher.quoteReplacement(newSegment));
+                    if (!result.equals(jsonBody)) {
+                        callbacks.printOutput("  -> 参数级兜底替换成功");
+                        return result;
+                    }
                 }
             }
             
@@ -2145,11 +2193,14 @@ public class HttpUtils {
             }
         }
         
-        // 跳过一些明显不需要测试的参数
-        String paramName = param.getName().toLowerCase();
-        if (paramName.equals("csrf_token") || paramName.equals("_token") || 
-            paramName.equals("authenticity_token") || paramName.startsWith("__")) {
-            return true;
+        // 跳过一些明显不需要测试的参数（Cookie参数除外）
+        // 当开启Cookie测试时，Cookie即使是__Host/__Secure前缀也应允许进入测试流程
+        if (paramType != IParameter.PARAM_COOKIE) {
+            String paramName = param.getName().toLowerCase();
+            if (paramName.equals("csrf_token") || paramName.equals("_token") ||
+                paramName.equals("authenticity_token") || paramName.startsWith("__")) {
+                return true;
+            }
         }
         
         // 检查参数过滤配置
@@ -2192,6 +2243,79 @@ public class HttpUtils {
      */
     private int getParameterCount(IRequestInfo requestInfo) {
         return requestInfo.getParameters().size();
+    }
+
+    /**
+     * 是否存在可测试参数
+     */
+    private boolean hasTestableParameters(IHttpRequestResponse originalRequest, IRequestInfo requestInfo) {
+        try {
+            List<IParameter> parameters = requestInfo.getParameters();
+
+            // 预估追加参数生效后的参数集合，保持与实际测试逻辑一致
+            if (burpExtender.config.isAppendParamsEnabled()) {
+                IHttpRequestResponse workingRequest = addAppendParamsToRequest(originalRequest, requestInfo);
+                if (workingRequest != originalRequest) {
+                    IRequestInfo updatedRequestInfo = helpers.analyzeRequest(workingRequest);
+                    parameters = updatedRequestInfo.getParameters();
+                }
+            }
+
+            for (IParameter param : parameters) {
+                if (shouldSkipParameter(param)) {
+                    continue;
+                }
+
+                // 追加参数未勾选“参与测试”时跳过
+                if (burpExtender.config.isAppendParamsEnabled() &&
+                    burpExtender.config.getAppendParams().containsKey(param.getName()) &&
+                    !burpExtender.config.getTestableAppendParams().contains(param.getName())) {
+                    continue;
+                }
+
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            callbacks.printError("可测试参数预检查失败，按可测试处理: " + e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * 生成请求去重指纹：方法 + 协议 + 主机 + 端口 + 路径 + 参数结构
+     */
+    private String generateRequestFingerprint(IRequestInfo requestInfo) {
+        try {
+            java.net.URL urlObj = requestInfo.getUrl();
+            String method = requestInfo.getMethod().toUpperCase(Locale.ROOT);
+            String protocol = urlObj.getProtocol().toLowerCase(Locale.ROOT);
+            String host = urlObj.getHost().toLowerCase(Locale.ROOT);
+            int port = urlObj.getPort() != -1 ? urlObj.getPort() : urlObj.getDefaultPort();
+            String path = urlObj.getPath() != null ? urlObj.getPath() : "/";
+
+            List<String> parameterKeys = new ArrayList<>();
+            for (IParameter param : requestInfo.getParameters()) {
+                byte type = param.getType();
+                if (type == IParameter.PARAM_URL ||
+                    type == IParameter.PARAM_BODY ||
+                    type == IParameter.PARAM_JSON ||
+                    type == IParameter.PARAM_COOKIE) {
+                    parameterKeys.add(type + ":" + param.getName().toLowerCase(Locale.ROOT));
+                }
+            }
+
+            if (burpExtender.config.isAppendParamsEnabled()) {
+                for (String appendParam : burpExtender.config.getTestableAppendParams()) {
+                    parameterKeys.add("APPEND:" + appendParam.toLowerCase(Locale.ROOT));
+                }
+            }
+            Collections.sort(parameterKeys);
+
+            return method + "|" + protocol + "|" + host + "|" + port + "|" + path + "|" + String.join("&", parameterKeys);
+        } catch (Exception e) {
+            return requestInfo.getMethod() + "|" + requestInfo.getUrl().toString();
+        }
     }
     
     /**
@@ -2835,28 +2959,25 @@ public class HttpUtils {
                 }
             }
             
-            // 策略3：简单字符串替换（最后手段）
-            // 对于JSON数组中的值，直接替换可能更有效
-            if (body.contains("\"" + oldValue + "\"")) {
-                String replacement3 = "\"" + escapeJsonValue(newValue) + "\"";
-                callbacks.printOutput("  -> [replaceJsonParameterInBody] 策略3 - 查找: \"" + oldValue + "\"");
-                callbacks.printOutput("  -> [replaceJsonParameterInBody] 策略3 - 替换: " + replacement3);
-                
-                result = body.replace("\"" + oldValue + "\"", replacement3);
-                if (!result.equals(body)) {
-                    callbacks.printOutput("  -> 策略3成功：简单字符串替换");
-                    return result;
-                }
+            // 策略3：参数级字符串兜底替换（仅替换目标参数）
+            String pattern3 = "\"" + escapeRegex(paramName) + "\"\\s*:\\s*\"[^\"]*\"";
+            String replacement3 = "\"" + paramName + "\":\"" + escapeJsonValue(newValue) + "\"";
+            callbacks.printOutput("  -> [replaceJsonParameterInBody] 策略3 - 模式: " + pattern3);
+            callbacks.printOutput("  -> [replaceJsonParameterInBody] 策略3 - 替换: " + replacement3);
+
+            result = body.replaceAll(pattern3, java.util.regex.Matcher.quoteReplacement(replacement3));
+            if (!result.equals(body)) {
+                callbacks.printOutput("  -> 策略3成功：参数级字符串兜底替换");
+                return result;
             }
-            
-            // 策略4：数字的简单替换
+
+            // 策略4：参数级数字兜底替换（仅替换目标参数）
             if (isNumericValue(oldValue)) {
-                // 确保只替换作为值的数字，不替换键名中的数字
-                String pattern4 = ":\\s*" + escapeRegex(oldValue) + "(?=\\s*[,}\\]])";
-                String replacement4 = ": " + (isNumericValue(newValue) ? newValue : "\"" + escapeJsonValue(newValue) + "\"");
-                result = body.replaceAll(pattern4, replacement4);
+                String pattern4 = "\"" + escapeRegex(paramName) + "\"\\s*:\\s*" + escapeRegex(oldValue) + "(?=\\s*[,}\\]])";
+                String replacement4 = "\"" + paramName + "\":" + (isNumericValue(newValue) ? newValue : "\"" + escapeJsonValue(newValue) + "\"");
+                result = body.replaceAll(pattern4, java.util.regex.Matcher.quoteReplacement(replacement4));
                 if (!result.equals(body)) {
-                    callbacks.printOutput("  -> 策略4成功：数字值简单替换");
+                    callbacks.printOutput("  -> 策略4成功：参数级数字兜底替换");
                     return result;
                 }
             }
