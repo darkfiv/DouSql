@@ -165,18 +165,6 @@ C:\Users\[用户名]\dousql\
 └── xia_SQL_sqlmap_config.ini
 ```
 
-## README 可以怎么继续优化
-
-如果后面还想继续收缩文档，推荐这样拆：
-
-- `README.md`：保留项目简介、核心能力、快速开始、配置目录、SQLMap 联动
-- `CHANGELOG.md`：放所有版本更新
-- `docs/usage.md`：放详细使用教程
-- `docs/configuration.md`：放各配置项说明
-- `docs/sqlmap.md`：放 SQLMap 联动细节与排错
-
-这样首页更适合新用户快速理解，详细内容也不会丢。
-
 ## 免责声明
 
 本工具仅供安全测试与学习研究使用。请确保你对目标拥有合法授权，使用者需自行遵守所在地法律法规，开发者不对任何误用或损害负责。
